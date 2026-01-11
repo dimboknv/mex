@@ -113,7 +113,7 @@ func main() {
 	// Запускаем сервер в горутине
 	go func() {
 		logger.Info("🚀 Server starting...", slog.String("address", address))
-		logger.Info(fmt.Sprintf("📡 API available at ", apiURL))
+		logger.Info(fmt.Sprintf("📡 API available at %s", apiURL))
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server failed to start", slog.Any("error", err))
