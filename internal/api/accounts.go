@@ -182,6 +182,20 @@ func (h *Handler) HandleSetMaster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверяем, не запущен ли copy trading
+	isActive, err := h.storage.HasActiveCopyTradingSession(userID)
+	if err != nil {
+		h.logger.Error("Failed to check copy trading status", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Failed to check copy trading status")
+
+		return
+	}
+
+	if isActive {
+		h.respondError(w, http.StatusConflict, "Cannot change master account while copy trading is active")
+		return
+	}
+
 	err = h.storage.SetMasterAccount(userID, accountID)
 	if err != nil {
 		h.logger.Error("Failed to set master account", "error", err)

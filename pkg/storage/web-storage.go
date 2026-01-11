@@ -572,6 +572,22 @@ func (s *WebStorage) GetLogs(userID int, limit, offset int) ([]models.ActivityLo
 	return logs, nil
 }
 
+// === Copy Trading Sessions ===
+
+// HasActiveCopyTradingSession проверяет, есть ли активная сессия copy trading
+func (s *WebStorage) HasActiveCopyTradingSession(userID int) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM copy_trading_sessions
+		WHERE user_id = ? AND is_active = 1
+	`, userID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 // Close закрывает соединение с БД
 func (s *WebStorage) Close() error {
 	return s.db.Close()

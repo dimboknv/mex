@@ -13,12 +13,11 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
-	"tg_mexc/pkg/models"
-	"tg_mexc/pkg/services/httpmiddleware"
 	"time"
 
-	"git.kanggiten.dev/shared/http-go-lb/roundtrip"
-	"git.kanggiten.dev/shared/http-go-lb/transport"
+	"tg_mexc/pkg/models"
+	"tg_mexc/pkg/services/httpmiddleware"
+
 	"github.com/google/uuid"
 )
 
@@ -51,7 +50,7 @@ func NewClient(account models.Account, logger *slog.Logger) (*Client, error) {
 	jar, _ := cookiejar.New(nil)
 
 	// Базовый transport
-	baseTransport := transport.DefaultExternal()
+	baseTransport := httpmiddleware.DefaultTransport()
 
 	// Если есть прокси - настраиваем
 	if account.Proxy != "" {
@@ -72,10 +71,9 @@ func NewClient(account models.Account, logger *slog.Logger) (*Client, error) {
 	httpClient := &http.Client{
 		Jar:     jar,
 		Timeout: 30 * time.Second,
-		Transport: roundtrip.Wrap(
+		Transport: httpmiddleware.Wrap(
 			baseTransport,
-			roundtrip.RayID,
-			roundtrip.RequestGetBodySetter,
+			httpmiddleware.RequestGetBodySetter,
 			httpmiddleware.Logger(logger, -1),
 		),
 	}
