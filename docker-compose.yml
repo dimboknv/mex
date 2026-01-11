@@ -2,10 +2,7 @@ version: '3.8'
 
 services:
   tg-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: tg-bot
+    image: ghcr.io/dimboknv/mex:latest
     container_name: mexc-tg-bot
     hostname: mexc-tg-bot
     restart: unless-stopped
@@ -34,10 +31,7 @@ services:
       - ./data/tg-bot:/app/data
 
   web-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: web-app
+    image: ghcr.io/dimboknv/mex:latest
     container_name: mexc-web-app
     hostname: mexc-web-app
     restart: unless-stopped
