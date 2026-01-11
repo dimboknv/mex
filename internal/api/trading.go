@@ -17,6 +17,7 @@ type CopyTradingStatus struct {
 	MasterName       string `json:"master_name,omitempty"`
 	ActiveSlaveCount int    `json:"active_slave_count"`
 	IgnoreFees       bool   `json:"ignore_fees"`
+	DryRun           bool   `json:"dry_run"`
 }
 
 // HandleStartCopyTrading запускает copy trading
@@ -41,7 +42,6 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		h.logger.Error("Failed to get slave accounts", "error", err)
 		h.respondError(w, http.StatusInternalServerError, "Failed to get slave accounts")
-
 		return
 	}
 
@@ -50,13 +50,17 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// TODO: Запускаем copy trading через сервис
-	// Пока что это заглушка, так как copy trading сервис работает с chatID
-	// Нужно будет адаптировать его для работы с userID
+	// Запускаем copy trading через WebService
+	if err := h.copyTradingWeb.Start(userID, req.IgnoreFees); err != nil {
+		h.logger.Error("Failed to start copy trading", "error", err, "user_id", userID)
+		h.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	h.respondSuccess(w, "Copy trading started successfully", map[string]any{
-		"master": master.Name,
-		"slaves": len(slaves),
+		"master":  master.Name,
+		"slaves":  len(slaves),
+		"dry_run": h.copyTradingWeb.IsDryRun(),
 	})
 }
 
@@ -64,8 +68,12 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 func (h *Handler) HandleStopCopyTrading(w http.ResponseWriter, r *http.Request) {
 	userID, _ := middleware.GetUserID(r.Context())
 
-	// TODO: Останавливаем copy trading через сервис
-	_ = userID
+	// Останавливаем copy trading через WebService
+	if err := h.copyTradingWeb.Stop(userID); err != nil {
+		h.logger.Error("Failed to stop copy trading", "error", err, "user_id", userID)
+		h.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	h.respondSuccess(w, "Copy trading stopped successfully", nil)
 }
@@ -79,6 +87,7 @@ func (h *Handler) HandleGetCopyTradingStatus(w http.ResponseWriter, r *http.Requ
 
 	status := CopyTradingStatus{
 		Active: false,
+		DryRun: h.copyTradingWeb.IsDryRun(),
 	}
 
 	if err == nil {
@@ -89,8 +98,16 @@ func (h *Handler) HandleGetCopyTradingStatus(w http.ResponseWriter, r *http.Requ
 		slaves, _ := h.storage.GetSlaveAccounts(userID, false)
 		status.ActiveSlaveCount = len(slaves)
 
-		// TODO: Проверяем действительно ли copy trading активен через сервис
-		status.Active = false // h.copyTrading.IsActive(userID)
+		// Проверяем активность copy trading через WebService
+		status.Active = h.copyTradingWeb.IsActive(userID)
+
+		// Если активен, получаем дополнительные данные из сессии
+		if status.Active {
+			_, slaveCount, ignoreFees, isDryRun := h.copyTradingWeb.GetStatus(userID)
+			status.ActiveSlaveCount = slaveCount
+			status.IgnoreFees = ignoreFees
+			status.DryRun = isDryRun
+		}
 	}
 
 	h.respondSuccess(w, "", status)

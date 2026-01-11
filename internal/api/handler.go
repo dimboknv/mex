@@ -11,23 +11,23 @@ import (
 
 // Handler обрабатывает API запросы
 type Handler struct {
-	storage       *storage.WebStorage
-	authService   *auth.Service
-	copyTrading   *copytrading.Service
-	mirrorManager *MirrorManager
-	mirrorURL     string
-	logger        *slog.Logger
+	storage        *storage.WebStorage
+	authService    *auth.Service
+	copyTradingWeb *copytrading.WebService
+	mirrorManager  *MirrorManager
+	mirrorURL      string
+	logger         *slog.Logger
 }
 
 // New создает новый API handler
-func New(storage *storage.WebStorage, authService *auth.Service, copyTrading *copytrading.Service, mirrorURL string, logger *slog.Logger) *Handler {
+func New(storage *storage.WebStorage, authService *auth.Service, copyTradingWeb *copytrading.WebService, mirrorURL string, logger *slog.Logger) *Handler {
 	return &Handler{
-		storage:       storage,
-		authService:   authService,
-		copyTrading:   copyTrading,
-		mirrorManager: NewMirrorManager(logger),
-		mirrorURL:     mirrorURL,
-		logger:        logger,
+		storage:        storage,
+		authService:    authService,
+		copyTradingWeb: copyTradingWeb,
+		mirrorManager:  NewMirrorManager(logger),
+		mirrorURL:      mirrorURL,
+		logger:         logger,
 	}
 }
 

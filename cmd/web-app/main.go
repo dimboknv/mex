@@ -95,10 +95,8 @@ func main() {
 	// Инициализация auth сервиса
 	authService := auth.NewService(jwtSecret, 24*time.Hour) // Токен действителен 24 часа
 
-	// Инициализация copy trading сервиса
-	// ВАЖНО: Здесь используется пустой storage, так как copy trading сервис
-	// ожидает старый storage. Нужно будет адаптировать его для работы с WebStorage
-	copyTradingService := copytrading.New(nil, logger, dryRun)
+	// Инициализация copy trading сервиса для Web App
+	copyTradingService := copytrading.NewWebService(webStorage, logger, dryRun)
 
 	// Инициализация API handler
 	apiHandler := api.New(webStorage, authService, copyTradingService, mirrorURL, logger)
@@ -133,6 +131,9 @@ func main() {
 	<-quit
 
 	logger.Info("🛑 Shutting down server...")
+
+	// Останавливаем все активные сессии copy trading
+	copyTradingService.StopAll()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

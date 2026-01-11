@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function setupEventListeners() {
+    console.log('setupEventListeners started');
     // Login
     loginForm.addEventListener('submit', handleLogin);
     document.getElementById('show-register')?.addEventListener('click', handleRegister);
@@ -404,7 +405,9 @@ function renderCopyTradingStatus(status) {
 }
 
 async function handleStartCopyTrading() {
+    console.log('handleStartCopyTrading called');
     const ignoreFees = document.getElementById('ignore-fees-checkbox').checked;
+    console.log('ignoreFees:', ignoreFees);
 
     try {
         const response = await fetch(`${API_URL}/api/copy-trading/start`, {
