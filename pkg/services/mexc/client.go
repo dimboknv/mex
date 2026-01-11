@@ -35,6 +35,7 @@ const (
 	changePlanPriceEndpoint    = "/api/platform/futures/api/v1/private/stoporder/change_plan_price"
 	openOrdersEndpoint         = "/api/platform/futures/api/v1/private/order/list/open_orders"
 	tieredFeeRateEndpoint      = "/api/platform/futures/api/v1/private/account/tiered_fee_rate/v2"
+	changeLeverageEndpoint     = "/api/platform/futures/api/v1/private/position/change_leverage"
 )
 
 // Client - клиент для работы с MEXC API
@@ -816,4 +817,326 @@ func (c *Client) GetTieredFeeRate(ctx context.Context, symbol string) (*models.T
 	}
 
 	return &result.Data, nil
+}
+
+// cleanRawRequest удаляет технические поля подписи из raw запроса
+func cleanRawRequest(reqBody []byte) ([]byte, error) {
+	var rawReq map[string]any
+	if err := json.Unmarshal(reqBody, &rawReq); err != nil {
+		return nil, err
+	}
+
+	// Удаляем поля с подписью master аккаунта
+	delete(rawReq, "p0")
+	delete(rawReq, "k0")
+	delete(rawReq, "chash")
+	delete(rawReq, "mtoken")
+	delete(rawReq, "ts")
+	delete(rawReq, "mhash")
+
+	return json.Marshal(rawReq)
+}
+
+// PlaceOrderRaw выполняет запрос на создание ордера с raw данными из browser mirror
+func (c *Client) PlaceOrderRaw(ctx context.Context, reqBody []byte) (string, error) {
+	timestamp := time.Now().UnixMilli()
+
+	body, err := cleanRawRequest(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + orderCreateEndpoint
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(req, timestamp, signature)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logger.Error("PlaceOrderRaw failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var orderResp models.OrderResponse
+	json.Unmarshal(respBody, &orderResp)
+
+	if !orderResp.Success {
+		c.logger.Error("PlaceOrderRaw API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", orderResp.Code),
+			slog.String("message", orderResp.Message))
+
+		return "", fmt.Errorf("order failed: %s", orderResp.Message)
+	}
+
+	c.logger.Info("✅ PlaceOrderRaw success",
+		slog.String("account", c.account.Name),
+		slog.String("orderId", orderResp.Data.OrderID))
+
+	return orderResp.Data.OrderID, nil
+}
+
+// SetStopLossRaw устанавливает SL/TP с raw данными из browser mirror
+func (c *Client) SetStopLossRaw(ctx context.Context, reqBody []byte) error {
+	timestamp := time.Now().UnixMilli()
+
+	body, err := cleanRawRequest(reqBody)
+	if err != nil {
+		return err
+	}
+
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + stopLossEndpoint
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(req, timestamp, signature)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logger.Error("SetStopLossRaw failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(respBody, &result)
+
+	if !result.Success {
+		c.logger.Error("SetStopLossRaw API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", result.Code),
+			slog.String("message", result.Message))
+
+		return fmt.Errorf("set SL/TP failed: %s", result.Message)
+	}
+
+	c.logger.Info("✅ SetStopLossRaw success",
+		slog.String("account", c.account.Name))
+
+	return nil
+}
+
+// ChangeStopLossRaw изменяет цену stop loss с raw данными из browser mirror
+func (c *Client) ChangeStopLossRaw(ctx context.Context, reqBody []byte) error {
+	timestamp := time.Now().UnixMilli()
+
+	body, err := cleanRawRequest(reqBody)
+	if err != nil {
+		return err
+	}
+
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + changePlanPriceEndpoint
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(req, timestamp, signature)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logger.Error("ChangeStopLossRaw failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(respBody, &result)
+
+	if !result.Success {
+		c.logger.Error("ChangeStopLossRaw API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", result.Code),
+			slog.String("message", result.Message))
+
+		return fmt.Errorf("change SL/TP failed: %s", result.Message)
+	}
+
+	c.logger.Info("✅ ChangeStopLossRaw success",
+		slog.String("account", c.account.Name))
+
+	return nil
+}
+
+// CancelStopLossRaw отменяет stop order с raw данными из browser mirror
+func (c *Client) CancelStopLossRaw(ctx context.Context, reqBody []byte) error {
+	timestamp := time.Now().UnixMilli()
+
+	body, err := cleanRawRequest(reqBody)
+	if err != nil {
+		return err
+	}
+
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + stopLossCancelEndpoint
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(req, timestamp, signature)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logger.Error("CancelStopLossRaw failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(respBody, &result)
+
+	if !result.Success {
+		c.logger.Error("CancelStopLossRaw API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", result.Code),
+			slog.String("message", result.Message))
+
+		return fmt.Errorf("cancel stop order failed: %s", result.Message)
+	}
+
+	c.logger.Info("✅ CancelStopLossRaw success",
+		slog.String("account", c.account.Name))
+
+	return nil
+}
+
+// ChangeLeverageRaw изменяет leverage с raw данными из browser mirror
+func (c *Client) ChangeLeverageRaw(ctx context.Context, reqBody []byte) error {
+	timestamp := time.Now().UnixMilli()
+
+	body, err := cleanRawRequest(reqBody)
+	if err != nil {
+		return err
+	}
+
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + changeLeverageEndpoint
+
+	req, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(req, timestamp, signature)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.logger.Error("ChangeLeverageRaw failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(respBody, &result)
+
+	if !result.Success {
+		c.logger.Error("ChangeLeverageRaw API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", result.Code),
+			slog.String("message", result.Message))
+
+		return fmt.Errorf("change leverage failed: %s", result.Message)
+	}
+
+	c.logger.Info("✅ ChangeLeverageRaw success",
+		slog.String("account", c.account.Name))
+
+	return nil
+}
+
+// ChangeLeverageRequest - запрос на изменение leverage
+type ChangeLeverageRequest struct {
+	Symbol       string `json:"symbol"`
+	Leverage     int    `json:"leverage"`
+	OpenType     int    `json:"openType"`
+	PositionType int    `json:"positionType"`
+}
+
+// ChangeLeverage изменяет leverage для символа
+func (c *Client) ChangeLeverage(ctx context.Context, req ChangeLeverageRequest) error {
+	timestamp := time.Now().UnixMilli()
+
+	body, _ := json.Marshal(req)
+	signature := c.generateSignature(timestamp, body)
+
+	apiURL := c.baseURL + changeLeverageEndpoint
+
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(body))
+	c.setHeaders(httpReq, timestamp, signature)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		c.logger.Error("ChangeLeverage failed",
+			slog.String("account", c.account.Name),
+			slog.Any("error", err))
+
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Success bool   `json:"success"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(respBody, &result)
+
+	if !result.Success {
+		c.logger.Error("ChangeLeverage API error",
+			slog.String("account", c.account.Name),
+			slog.Int("code", result.Code),
+			slog.String("message", result.Message))
+
+		return fmt.Errorf("change leverage failed: %s", result.Message)
+	}
+
+	c.logger.Info("✅ ChangeLeverage success",
+		slog.String("account", c.account.Name),
+		slog.String("symbol", req.Symbol),
+		slog.Int("leverage", req.Leverage),
+		slog.Int("position_type", req.PositionType))
+
+	return nil
 }

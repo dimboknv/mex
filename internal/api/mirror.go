@@ -1,15 +1,24 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
-	"tg_mexc/internal/middleware"
 	"time"
+
+	"tg_mexc/internal/middleware"
+	"tg_mexc/pkg/models"
+	"tg_mexc/pkg/services/mexc"
 )
+
+// Подавление предупреждения о неиспользуемых импортах
+var _ = models.Account{}
 
 // MirrorRequest - данные перехваченного запроса
 type MirrorRequest struct {
@@ -82,7 +91,7 @@ func (m *MirrorManager) ValidateToken(token string) (*MirrorToken, bool) {
 	return mt, ok
 }
 
-// HandleMirrorReceive принимает перехваченные запросы
+// HandleMirrorReceive принимает перехваченные запросы (старый формат - JSON wrapper)
 func (h *Handler) HandleMirrorReceive(w http.ResponseWriter, r *http.Request) {
 	// Получаем токен из header
 	token := r.Header.Get("X-Mirror-Token")
@@ -115,10 +124,321 @@ func (h *Handler) HandleMirrorReceive(w http.ResponseWriter, r *http.Request) {
 		slog.Any("response_data", req.ResponseData),
 	)
 
-	// Здесь в будущем будет логика copy trading
-	// TODO: Парсинг запросов и выполнение copy trading
-
 	h.respondSuccess(w, "OK", nil)
+}
+
+// HandleMirrorAPI обрабатывает прямые API запросы от browser mirror
+func (h *Handler) HandleMirrorAPI(w http.ResponseWriter, r *http.Request) {
+	// Получаем токен из header
+	token := r.Header.Get("X-Mirror-Token")
+	if token == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Валидируем токен
+	mirrorToken, ok := h.mirrorManager.ValidateToken(token)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Читаем тело запроса
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error("Failed to read request body", slog.Any("error", err))
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Определяем тип запроса по URL path
+	path := r.URL.Path
+
+	h.logger.Info("🔵 Mirror API request",
+		slog.String("user", mirrorToken.Username),
+		slog.Int("user_id", mirrorToken.UserID),
+		slog.String("path", path),
+		slog.String("body", string(body)),
+	)
+
+	// Запускаем обработку в горутине и сразу отвечаем 200 OK
+	go h.processMirrorRequest(mirrorToken.UserID, path, body)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success":true}`))
+}
+
+// processMirrorRequest обрабатывает mirror запрос и выполняет его на slave аккаунтах
+func (h *Handler) processMirrorRequest(userID int, path string, body []byte) {
+	ctx := context.Background()
+
+	// Получаем slave аккаунты
+	slaves, err := h.storage.GetSlaveAccounts(userID, false)
+	if err != nil {
+		h.logger.Error("Failed to get slave accounts",
+			slog.Int("user_id", userID),
+			slog.Any("error", err))
+		return
+	}
+
+	if len(slaves) == 0 {
+		h.logger.Info("No slave accounts found",
+			slog.Int("user_id", userID))
+		return
+	}
+
+	h.logger.Info("🚀 Processing mirror request for slaves",
+		slog.Int("user_id", userID),
+		slog.String("path", path),
+		slog.Int("slave_count", len(slaves)))
+
+	// Обрабатываем запрос в зависимости от пути
+	switch {
+	case strings.HasSuffix(path, "/order/create"):
+		h.mirrorOrderCreate(ctx, slaves, body)
+	case strings.HasSuffix(path, "/planorder/place"):
+		h.mirrorPlanOrderPlace(ctx, slaves, body)
+	case strings.HasSuffix(path, "/stoporder/cancel"):
+		h.mirrorStopOrderCancel(ctx, slaves, body)
+	case strings.HasSuffix(path, "/stoporder/change_plan_price"):
+		h.mirrorChangePlanPrice(ctx, slaves, body)
+	// case strings.HasSuffix(path, "/change_leverage"):
+	// 	h.mirrorChangeLeverage(ctx, slaves, body)
+	default:
+		h.logger.Warn("Unknown mirror path",
+			slog.String("path", path))
+	}
+}
+
+// mirrorOrderCreate дублирует создание ордера на slave аккаунты
+// Поддерживает открытие (side 1, 3) и закрытие (side 2, 4) позиций
+func (h *Handler) mirrorOrderCreate(ctx context.Context, slaves []models.Account, body []byte) {
+	// Парсим для логирования
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logger.Error("Failed to parse order create request", slog.Any("error", err))
+		return
+	}
+
+	symbol, _ := req["symbol"].(string)
+	side, _ := req["side"].(float64)
+	vol, _ := req["vol"].(float64)
+	leverage, _ := req["leverage"].(float64)
+
+	// Определяем тип операции
+	orderType := "OPEN"
+	if int(side) == 2 || int(side) == 4 {
+		orderType = "CLOSE"
+	}
+
+	h.logger.Info("📊 Mirror order create",
+		slog.String("type", orderType),
+		slog.String("symbol", symbol),
+		slog.Int("side", int(side)),
+		slog.Int("vol", int(vol)),
+		slog.Int("leverage", int(leverage)))
+
+	var wg sync.WaitGroup
+	for _, slave := range slaves {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			client, err := mexc.NewClient(acc, h.logger)
+			if err != nil {
+				h.logger.Error("Failed to create MEXC client",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			// Используем PlaceOrderRaw для точной репликации запроса
+			orderID, err := client.PlaceOrderRaw(ctx, body)
+			if err != nil {
+				h.logger.Error("❌ Mirror order failed",
+					slog.String("account", acc.Name),
+					slog.String("type", orderType),
+					slog.Any("error", err))
+				return
+			}
+
+			h.logger.Info("✅ Mirror order success",
+				slog.String("account", acc.Name),
+				slog.String("type", orderType),
+				slog.String("order_id", orderID))
+		}(slave)
+	}
+	wg.Wait()
+}
+
+// mirrorPlanOrderPlace дублирует установку SL/TP на slave аккаунты
+func (h *Handler) mirrorPlanOrderPlace(ctx context.Context, slaves []models.Account, body []byte) {
+	// Парсим для логирования
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logger.Error("Failed to parse plan order place request", slog.Any("error", err))
+		return
+	}
+
+	symbol, _ := req["symbol"].(string)
+	stopLossPrice, _ := req["stopLossPrice"].(float64)
+	takeProfitPrice, _ := req["takeProfitPrice"].(float64)
+
+	h.logger.Info("📊 Mirror plan order place",
+		slog.String("symbol", symbol),
+		slog.Float64("stop_loss", stopLossPrice),
+		slog.Float64("take_profit", takeProfitPrice))
+
+	var wg sync.WaitGroup
+	for _, slave := range slaves {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			client, err := mexc.NewClient(acc, h.logger)
+			if err != nil {
+				h.logger.Error("Failed to create MEXC client",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			err = client.SetStopLossRaw(ctx, body)
+			if err != nil {
+				h.logger.Error("❌ Mirror set SL/TP failed",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			h.logger.Info("✅ Mirror set SL/TP success",
+				slog.String("account", acc.Name))
+		}(slave)
+	}
+	wg.Wait()
+}
+
+// mirrorStopOrderCancel дублирует отмену stop order на slave аккаунты
+func (h *Handler) mirrorStopOrderCancel(ctx context.Context, slaves []models.Account, body []byte) {
+	h.logger.Info("📊 Mirror stop order cancel")
+
+	var wg sync.WaitGroup
+	for _, slave := range slaves {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			client, err := mexc.NewClient(acc, h.logger)
+			if err != nil {
+				h.logger.Error("Failed to create MEXC client",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			err = client.CancelStopLossRaw(ctx, body)
+			if err != nil {
+				h.logger.Error("❌ Mirror cancel stop order failed",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+			} else {
+				h.logger.Info("✅ Mirror cancel stop order success",
+					slog.String("account", acc.Name))
+			}
+		}(slave)
+	}
+	wg.Wait()
+}
+
+// mirrorChangePlanPrice дублирует изменение цены stop loss на slave аккаунты
+func (h *Handler) mirrorChangePlanPrice(ctx context.Context, slaves []models.Account, body []byte) {
+	// Парсим для логирования
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logger.Error("Failed to parse change plan price request", slog.Any("error", err))
+		return
+	}
+
+	stopLossPrice, _ := req["stopLossPrice"].(float64)
+
+	h.logger.Info("📊 Mirror change plan price",
+		slog.Float64("stop_loss_price", stopLossPrice))
+
+	var wg sync.WaitGroup
+	for _, slave := range slaves {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			client, err := mexc.NewClient(acc, h.logger)
+			if err != nil {
+				h.logger.Error("Failed to create MEXC client",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			err = client.ChangeStopLossRaw(ctx, body)
+			if err != nil {
+				h.logger.Error("❌ Mirror change stop loss failed",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			h.logger.Info("✅ Mirror change stop loss success",
+				slog.String("account", acc.Name))
+		}(slave)
+	}
+	wg.Wait()
+}
+
+// mirrorChangeLeverage дублирует изменение leverage на slave аккаунты
+func (h *Handler) mirrorChangeLeverage(ctx context.Context, slaves []models.Account, body []byte) {
+	// Парсим для логирования
+	var req map[string]any
+	if err := json.Unmarshal(body, &req); err != nil {
+		h.logger.Error("Failed to parse change leverage request", slog.Any("error", err))
+		return
+	}
+
+	symbol, _ := req["symbol"].(string)
+	leverage, _ := req["leverage"].(float64)
+	positionType, _ := req["positionType"].(float64)
+
+	h.logger.Info("📊 Mirror change leverage",
+		slog.String("symbol", symbol),
+		slog.Int("leverage", int(leverage)),
+		slog.Int("position_type", int(positionType)))
+
+	var wg sync.WaitGroup
+	for _, slave := range slaves {
+		wg.Add(1)
+		go func(acc models.Account) {
+			defer wg.Done()
+
+			client, err := mexc.NewClient(acc, h.logger)
+			if err != nil {
+				h.logger.Error("Failed to create MEXC client",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			err = client.ChangeLeverageRaw(ctx, body)
+			if err != nil {
+				h.logger.Error("❌ Mirror change leverage failed",
+					slog.String("account", acc.Name),
+					slog.Any("error", err))
+				return
+			}
+
+			h.logger.Info("✅ Mirror change leverage success",
+				slog.String("account", acc.Name))
+		}(slave)
+	}
+	wg.Wait()
 }
 
 // HandleGetMirrorScript возвращает JS код с токеном пользователя

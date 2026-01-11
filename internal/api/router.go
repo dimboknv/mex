@@ -46,8 +46,12 @@ func (h *Handler) SetupRouter(webDir string) *mux.Router {
 	// Mirror (Browser Copy Trading)
 	api.HandleFunc("/mirror/script", h.HandleGetMirrorScript).Methods("GET")
 
-	// Mirror receive endpoint (публичный, использует токен в query)
+	// Mirror receive endpoint (публичный, использует токен в header)
 	r.HandleFunc("/api/mirror/receive", h.HandleMirrorReceive).Methods("POST", "OPTIONS")
+
+	// Mirror API endpoints - перехват прямых MEXC API запросов
+	// Эти маршруты обрабатывают запросы от browser mirror скрипта
+	r.PathPrefix("/api/platform/futures/").HandlerFunc(h.HandleMirrorAPI).Methods("POST", "OPTIONS")
 
 	// Статические файлы (должны быть в конце)
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir(webDir)))
