@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEXC Copy Trading - Web App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container" id="login-container">
+        <div class="login-box">
+            <h1>🌐 MEXC Copy Trading</h1>
+            <h2>Вход в систему</h2>
+            <div id="login-error" class="error hidden"></div>
+            <form id="login-form">
+                <input type="text" id="username" placeholder="Username" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit">Войти</button>
+            </form>
+            <p class="hint">Нет аккаунта? <a href="#" id="show-register">Зарегистрироваться</a></p>
+        </div>
+    </div>
+
+    <div class="app-container hidden" id="app-container">
+        <nav class="navbar">
+            <h1>🌐 MEXC Copy Trading</h1>
+            <div class="nav-menu">
+                <a href="#" class="nav-item active" data-page="accounts">Аккаунты</a>
+                <a href="#" class="nav-item" data-page="copytrading">Copy Trading</a>
+                <a href="#" class="nav-item" data-page="mirror">Browser Mirror</a>
+                <a href="#" class="nav-item" data-page="trades">История сделок</a>
+                <a href="#" class="nav-item" data-page="logs">Логи</a>
+            </div>
+            <div class="user-info">
+                <span id="username-display"></span>
+                <button id="logout-btn">Выход</button>
+            </div>
+        </nav>
+
+        <!-- Accounts Page -->
+        <div class="page active" id="page-accounts">
+            <div class="page-header">
+                <h2>📋 Управление аккаунтами</h2>
+                <div>
+                    <button id="load-details-btn" class="btn-secondary">💰 Load Balances & Fees</button>
+                    <button id="add-account-btn" class="btn-primary">+ Добавить аккаунт</button>
+                </div>
+            </div>
+            <div id="accounts-list"></div>
+        </div>
+
+        <!-- Copy Trading Page -->
+        <div class="page" id="page-copytrading">
+            <div class="page-header">
+                <h2>🔄 Copy Trading</h2>
+            </div>
+            <div class="copy-trading-status">
+                <div class="status-card">
+                    <h3>Статус</h3>
+                    <div id="copy-status-display"></div>
+                </div>
+                <div class="copy-trading-controls">
+                    <button id="start-copy-btn" class="btn-success">Запустить Copy Trading</button>
+                    <button id="stop-copy-btn" class="btn-danger hidden">Остановить Copy Trading</button>
+                    <label>
+                        <input type="checkbox" id="ignore-fees-checkbox">
+                        Игнорировать комиссии
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Browser Mirror Page -->
+        <div class="page" id="page-mirror">
+            <div class="page-header">
+                <h2>🔄 Browser Mirror</h2>
+            </div>
+            <div class="mirror-content">
+                <div class="mirror-info">
+                    <h3>Как это работает?</h3>
+                    <ol>
+                        <li>Скопируйте JS код ниже</li>
+                        <li>Откройте MEXC Futures в браузере</li>
+                        <li>Откройте DevTools (F12) → Console</li>
+                        <li>Вставьте код и нажмите Enter</li>
+                        <li>Все запросы к API будут отправляться на сервер</li>
+                    </ol>
+                    <p class="hint">⚠️ Код нужно вставлять заново при перезагрузке страницы</p>
+                </div>
+                <div class="mirror-script-box">
+                    <h4>Ваш персональный JS код:</h4>
+                    <pre id="mirror-script-code">Загрузка...</pre>
+                    <button id="copy-mirror-script-btn" class="btn-primary">📋 Копировать код</button>
+                    <button id="refresh-mirror-script-btn" class="btn-secondary">🔄 Обновить токен</button>
+                </div>
+                <div class="mirror-status">
+                    <h4>Статус:</h4>
+                    <p id="mirror-status-text">Ожидание данных...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trades Page -->
+        <div class="page" id="page-trades">
+            <div class="page-header">
+                <h2>📊 История сделок</h2>
+                <button id="refresh-trades-btn" class="btn-primary">🔄 Обновить</button>
+            </div>
+            <div id="trades-list"></div>
+        </div>
+
+        <!-- Logs Page -->
+        <div class="page" id="page-logs">
+            <div class="page-header">
+                <h2>📝 Логи активности</h2>
+                <button id="refresh-logs-btn" class="btn-primary">🔄 Обновить</button>
+            </div>
+            <div id="logs-list"></div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для добавления аккаунта -->
+    <div class="modal hidden" id="add-account-modal">
+        <div class="modal-content">
+            <h2>Добавить аккаунт</h2>
+            <div class="modal-body">
+                <div class="instructions">
+                    <h3>Инструкция:</h3>
+                    <ol>
+                        <li>Откройте https://www.mexc.com/futures в браузере</li>
+                        <li>Войдите в аккаунт</li>
+                        <li>Откройте DevTools (F12) → Console</li>
+                        <li>Напишите: <code>allow pasting</code></li>
+                        <li>Скопируйте и вставьте скрипт ниже</li>
+                        <li>Файл mexc-data.json автоматически скачается</li>
+                        <li>Вставьте содержимое файла в поле ниже</li>
+                    </ol>
+                    <div class="script-box">
+                        <pre id="browser-script"></pre>
+                        <button id="copy-script-btn" class="btn-small">Копировать скрипт</button>
+                    </div>
+                </div>
+                <form id="add-account-form">
+                    <input type="text" id="account-name" placeholder="Имя аккаунта" required>
+                    <input type="text" id="account-proxy" placeholder="Прокси (опционально)">
+                    <textarea id="account-json" placeholder="Вставьте JSON из файла mexc-data.json" rows="6" required></textarea>
+                    <div class="modal-actions">
+                        <button type="submit" class="btn-success">Добавить</button>
+                        <button type="button" class="btn-secondary" id="close-modal-btn">Отмена</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

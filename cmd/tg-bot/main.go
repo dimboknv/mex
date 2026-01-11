@@ -1,0 +1,201 @@
+package main
+
+import (
+	"context"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"tg_mexc/internal/handlers"
+	"tg_mexc/pkg/config"
+	"tg_mexc/pkg/services/copytrading"
+	"tg_mexc/pkg/services/telegram"
+	"tg_mexc/pkg/storage"
+	"time"
+
+	"github.com/lmittmann/tint"
+)
+
+func main() {
+	// Конфигурация slog для вывода в файл и stdout
+	logFile, err := os.OpenFile("bot_browser.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	if err != nil {
+		log.Fatal("Failed to open log file:", err)
+	}
+	defer logFile.Close()
+
+	// Pretty handler для stdout с цветами
+	prettyHandler := tint.NewHandler(os.Stdout, &tint.Options{
+		Level:      slog.LevelDebug,
+		TimeFormat: time.Kitchen, // "3:04PM"
+		AddSource:  false,
+		NoColor:    false,
+	})
+
+	// Обычный текстовый handler для файла
+	fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+
+	// Мультиплексируем логи в оба handler'а
+	logger := slog.New(&multiHandler{
+		handlers: []slog.Handler{prettyHandler, fileHandler},
+	})
+
+	logger.Info("=== MEXC Copy Trading Bot (Browser Auth) ===")
+
+	// Загрузка конфигурации
+	cfg := config.Load(logger)
+
+	// Инициализация хранилища
+	store, err := storage.New(cfg.DBPath, logger)
+	if err != nil {
+		logger.Error("Failed to initialize storage", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	// Инициализация Telegram сервиса
+	tgService, err := telegram.New(cfg.TelegramToken, logger)
+	if err != nil {
+		logger.Error("Failed to initialize Telegram service", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	// Инициализация Copy Trading сервиса
+	copyTradingService := copytrading.New(store, logger, cfg.DryRun)
+
+	// Создание обработчика
+	handler := handlers.New(store, tgService, copyTradingService, logger)
+
+	// Запуск бота
+	logger.Info("🚀 Starting bot...")
+
+	// Выбор режима работы: webhook или polling
+	if cfg.WebhookURL != "" {
+		// Webhook mode
+		webhookFullURL := cfg.WebhookURL + cfg.WebhookPath
+		if err := tgService.SetWebhook(webhookFullURL); err != nil {
+			logger.Error("Failed to set webhook", slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		// Создаем HTTP сервер для webhook
+		mux := http.NewServeMux()
+		mux.Handle(cfg.WebhookPath, tgService.ListenForWebhook(cfg.WebhookPath))
+
+		// Health check endpoint
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		})
+
+		srv := &http.Server{
+			Addr:         cfg.Address,
+			Handler:      mux,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+
+		// Запускаем HTTP сервер в горутине
+		go func() {
+			logger.Info("📡 Webhook server starting...", slog.String("address", cfg.Address))
+
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("Webhook server failed", slog.Any("error", err))
+				os.Exit(1)
+			}
+		}()
+
+		// Обработка обновлений из webhook
+		updates := tgService.GetWebhookUpdatesChan()
+		go func() {
+			for update := range updates {
+				go handler.HandleUpdate(update)
+			}
+		}()
+
+		// Graceful shutdown
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		<-quit
+
+		logger.Info("🛑 Shutting down bot...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(ctx); err != nil {
+			logger.Error("Server forced to shutdown", slog.Any("error", err))
+		}
+
+		logger.Info("✅ Bot stopped")
+	} else {
+		// Polling mode (для локальной разработки)
+		logger.Info("📡 Listening for commands (polling mode)...")
+
+		updates := tgService.GetUpdatesChan()
+
+		// Graceful shutdown для polling mode
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+		go func() {
+			<-quit
+			logger.Info("🛑 Shutting down bot...")
+			tgService.GetBot().StopReceivingUpdates()
+		}()
+
+		for update := range updates {
+			go handler.HandleUpdate(update)
+		}
+
+		logger.Info("✅ Bot stopped")
+	}
+}
+
+// multiHandler отправляет логи в несколько handlers одновременно
+type multiHandler struct {
+	handlers []slog.Handler
+}
+
+func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *multiHandler) Handle(ctx context.Context, record slog.Record) error {
+	for _, h := range m.handlers {
+		if err := h.Handle(ctx, record); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	handlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		handlers[i] = h.WithAttrs(attrs)
+	}
+
+	return &multiHandler{handlers: handlers}
+}
+
+func (m *multiHandler) WithGroup(name string) slog.Handler {
+	handlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		handlers[i] = h.WithGroup(name)
+	}
+
+	return &multiHandler{handlers: handlers}
+}

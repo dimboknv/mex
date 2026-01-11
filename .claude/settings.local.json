@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.mexc.com)",
+      "Bash(go build:*)",
+      "Bash(echo:*)",
+      "Bash(go run:*)",
+      "Bash(go get:*)",
+      "Bash(mkdir:*)",
+      "Bash(timeout 10 ./ws_feed:*)",
+      "Bash(sqlite3:*)",
+      "Bash(test:*)",
+      "Bash(go test:*)",
+      "Bash(go mod tidy:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

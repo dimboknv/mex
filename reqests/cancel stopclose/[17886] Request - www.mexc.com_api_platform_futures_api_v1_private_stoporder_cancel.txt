@@ -1,0 +1,35 @@
+POST /api/platform/futures/api/v1/private/stoporder/cancel HTTP/1.1
+Host: www.mexc.com
+Connection: keep-alive
+Content-Length: 31
+Language: English
+sec-ch-ua-platform: "macOS"
+Authorization: WEB7f7dde547c2cc3f30e7ac84dc3334aa625e504bb7ede345abe62c7795a5d755d
+x-mxc-sign: 66204758d007637727e8129d50581e28
+sec-ch-ua: "Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
+sec-ch-ua-mobile: ?0
+baggage: sentry-environment=production,sentry-release=v5.26.15__b79a3410e342716835843967c17156db7de0ee9c,sentry-public_key=1693f35b10b540f19e1c27821cdd5a74,sentry-trace_id=b44234e94c1c4eb2ae3d0be1028bbb66,sentry-sample_rate=0.01,sentry-sampled=false
+sentry-trace: b44234e94c1c4eb2ae3d0be1028bbb66-b3804cdd6bb95dee-0
+X-Language: en-US
+trochilus-uid: 12629637
+Content-Type: application/json
+platform: H5-web
+x-mxc-nonce: 1767384086361
+Pragma: akamai-x-cache-on
+trochilus-trace-id: cba398ca-1044-4342-9052-bb1ba137f24e-2069
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+Accept: */*
+Origin: https://www.mexc.com
+Sec-Fetch-Site: same-origin
+Sec-Fetch-Mode: cors
+Sec-Fetch-Dest: empty
+Referer: https://www.mexc.com/futures/BTC_USDT?type=linear_swap
+Accept-Encoding: gzip, deflate, br, zstd
+Accept-Language: en-US,en;q=0.9
+Cookie: _ym_uid=1766666022619974760; _ym_d=1766666022; mxc_theme_main=dark; NEXT_LOCALE=en-US; mxc_exchange_layout=BA; _fbp=fb.1.1766666026641.262202212298965754; _ga=GA1.1.605948679.1766666027; cslfp=eyJ1dWlkQ2xpZW50IjoiYjhiMTYxMzItNDE5ZS00YWYxLThkZjAtNDQ2NGMyMDk5NjY3Iiwia2V5IjoiMDdmYTRkYTcyMTZjZWNmZDA3M2MxOWZhMjEzYTE2NDlmZDRmZWU0NWY5MzljNzhjNmNlZGQ1Y2U4NzgwZDMwNiJ9; _ga_XGQZQ7Q7T5=GS2.1.s1766666150$o1$g0$t1766666150$j60$l0$h0; x-mxc-fingerprint=O7x0nYLp3gGKRJcXSfQ6; CLIENT_LANG=en-US; mxc_theme_upcolor=upgreen; uc_token=WEB7f7dde547c2cc3f30e7ac84dc3334aa625e504bb7ede345abe62c7795a5d755d; u_id=WEB7f7dde547c2cc3f30e7ac84dc3334aa625e504bb7ede345abe62c7795a5d755d; _vid_t=w+44Eue15WzsBzSSCmIY5DjYjWnCCOv/OIeCCb46LH2g6sfdphW45PYadxwlaNqgQ7UasIeN2GRMa+rFt+AoRJxVHYLR2y5yp0SzHNc=; mexc_fingerprint_visitorId=O7x0nYLp3gGKRJcXSfQ6; mexc_fingerprint_requestId=1767178686197.6axwdd; sensorsdata2015jssdkcross=%7B%22distinct_id%22%3A%22741fa72b3fec453cbc68e095e898bda8%22%2C%22first_id%22%3A%2219b558038891299-064629b7f0d4628-1c525631-1484784-19b5580388a2595%22%2C%22props%22%3A%7B%22%24latest_traffic_source_type%22%3A%22%E7%9B%B4%E6%8E%A5%E6%B5%81%E9%87%8F%22%2C%22%24latest_search_keyword%22%3A%22%E6%9C%AA%E5%8F%96%E5%88%B0%E5%80%BC_%E7%9B%B4%E6%8E%A5%E6%89%93%E5%BC%80%22%2C%22%24latest_referrer%22%3A%22%22%2C%22%24latest_landing_page%22%3A%22https%3A%2F%2Fwww.mexc.com%2F%22%7D%2C%22identities%22%3A%22eyIkaWRlbnRpdHlfY29va2llX2lkIjoiMTliNTU4MDM4ODkxMjk5LTA2NDYyOWI3ZjBkNDYyOC0xYzUyNTYzMS0xNDg0Nzg0LTE5YjU1ODAzODhhMjU5NSIsIiRpZGVudGl0eV9sb2dpbl9pZCI6Ijc0MWZhNzJiM2ZlYzQ1M2NiYzY4ZTA5NWU4OThiZGE4In0%3D%22%2C%22history_login_id%22%3A%7B%22name%22%3A%22%24identity_login_id%22%2C%22value%22%3A%22741fa72b3fec453cbc68e095e898bda8%22%7D%2C%22%24device_id%22%3A%2219b558038891299-064629b7f0d4628-1c525631-1484784-19b5580388a2595%22%7D; g_state={"i_l":0,"i_ll":1767368887340,"i_b":"L1ekFT/87/p1ORlzBNDBE72qV1iomLQUPIt3fwqIZps","i_e":{"enable_itp_optimization":0}}; _ym_isad=2; bm_sz=46AA962969BED12727A7A0A45CCBAF4A~YAAQTVkVAoq1qHebAQAARKUqgB4yEyHJX0ejDYFnVGZyryEvvXAeAkVRRgaODfNMZ8bcRpltXmg9jVLosNU4vr0TqudkwhCWhrnHAynCKAKiplcYlZ12wYsKYhe1YKVLEP7h2+O2y6spSxNI1devlpZXYDBc8mOk9XzZ0nCPG5E21TTXHzaILaVpq9EgQudEV0P+QwZj4M/L9TOtssyqIO5atkZNatbJi8ieSTmjVjX0mdRpGBltX+xwRXBS4pMSjUuqrgsCyHR50VyccCnFqVKqTD0sLg1lS9x8rXeM7HoXnyi9DeyqWzys1PGt9VE1HdDHRTBvBZi5MgS+txG1u7lKTBO6VbLeiwNXlWMNiyWD+poupFqkKQHO2/IjlxRSdaI554nw3ydkPcK7rQ==~3682616~4342084; ak_bmsc=CCE523465CF1913CCD139346390C1417~000000000000000000000000000000~YAAQR1kVAmn0X36bAQAAGBhBgB4xuruSHeAAKmJtqS2JdvXdKDLIOiDGUaTi2zMJS5ZjnFr8ajW2DQ54pEIMirtXypHsKL44XMlwfEPbJ67SF67+SDLd38mKH6ok26ESKKSfgw1B9HccQ/zXCLjkRzDpUurO3bs9JvygfYpa9ZGaohoGis/lraitMTWRYm8BiXySD6x5k03IfCKAM77UJEcoM4u88GP4qc4JtgO36RegEABO6wV3Qb8WjRwMdFBEnSygDqWNNmJgJoGEnYMpQeepNvnceejDLfYgH5irxT5AvjXQKL086dblVYdZk3Q5HlvFyv3u4ARSDy+/HbfztCWWjLOTt8n34xmGc04CzxB+TRLYVGXqptRRdCc=; _ga_L6XJCQTK75=GS2.1.s1767383744$o4$g1$t1767383868$j60$l0$h0; _abck=DAE5FFB682EC61DB842AFBD67AF698C8~-1~YAAQFa0VAm0B+36bAQAAT/FMgA89U79H4AdN+NV7NPkLhXTcbUrBPJOJVrzm13C6mLaBtWCCP72b6+2stb9BXFBQ2BknscWZQpMrzXFeyMTw9o7m+t4+/8wJ2MMZCNcrWNPYGJD+4viXBqOLjlVxkd32R0Fvt4cDHeHgllqAgfGVvw+KSmO/cnd7s4M80asNyaV9AcMU1DQ/+KYT3YpylDr/7wZyAhAJLvWPb+tdB9Jpacm6ntnsJU9/ZLJbe9iRFqp3g17nJ711T4pIHjK4mQir6jjxvOb/jWyaDSUIn5xEpPmSeTUt4tLs8ahowMHk8J8Fh4vLE/ztVuXw/kWrBzsAfLRnpbijWM9zLd1ddcuWQ1HNRiWpv3mPi2ZsMeAPIH6zvPHB0xopjq22aKSgVCgV8xqMc/tTmqdLakwG4Z/M7iQ0VlXbMTn2ldpkFLVCdYNH5q7oRydFTcGKt6JyWHOWFc12Dv/ovEAo4zW0GrZBhrqS/qW/QoIrW8Or/actwG/vYNVSCACCL430ICw5TDJdc6Q/n/ElHUtE7QucXMgJyMcTcGx4OyDfdWxcdDNCSIKFi/c/UyIttJ6/AwVHV6QtEK5BMsoudxBICCUORmHF2a1X4HD6YbKb+VJPOlIYvePjn9mH79xQb2dhuMEoiTxzGAUU6u4RQUH6/ayuVuU56BN13NX82Iw+75AVZCmRSlFlwwetkawSEfAQVz/RT7D72XvnOPIiDDlMi+pe4TKAkVBIa+i49Tiak/ttfT1Fj8oUeYqr7pVoVSYuSOTllZUgo7zLJ/9b88BBCfVOICa5KnqZqJM5YD2nNv3yg+OaGGjaBLT2Xidq9X3VQoO/5LFJRE9QO7heIsnFyo1SLEPHeDGh3/kN8w==~-1~-1~-1~AAQAAAAE%2f%2f%2f%2f%2f3YHuBcxcYTHnLdSiJ9Xgnq+E8J3AXbQwQDHuxe37W5PDkjmue6tJ5AZflAXkBfEJ0bG1HB82TocHLNPTt5uPHs2tqNDGqDmc5e0f6pCA1MuAGHetIhtjK6oPERNc7%2fuEOoOPJhLtxcE9BZYCv3ITmA8Fboox+1M5pNlSWwWJxrpbvf1oJRD4X%2fAdlKvqZQXTPcdkEJirN60~-1; bm_sv=BFE9F9C66C94CF1688A4B500EF7B824A~YAAQV1kVApi+wn+bAQAAXvJMgB63VuGhsuJcQNJ0HCTWmEUvpbG+0hgcTK4kpmBMHEZNYWF+IMBNipJny5LbUbubIE7CYy7wy4ZHMHWm9Ls9NHxaSJa4jl4+3bkw0fU4gn/ESeRltoZNHXrVh++EAXrKF2ZSpv/XInm2ArvYbegCXe43+PDEabfz7VD0yLjlHqNNlSSRn8xNLCoP3noDT7Ht2eBrOsxsIcfreJs2GbBp98/0wI0X9AyBHKFvYPkG~1
+
+[
+  {
+    "stopPlanOrderId": 446349283
+  }
+]

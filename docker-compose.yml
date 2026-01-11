@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  tg-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tg-bot
+    container_name: mexc-tg-bot
+    hostname: mexc-tg-bot
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "3"
+    networks:
+      - traefik_backend
+    labels:
+      - traefik.enable=true
+      # Telegram webhook endpoint
+      - traefik.http.services.mexc_tg_bot.loadbalancer.server.port=8080
+      - traefik.http.routers.mexc_tg_bot.service=mexc_tg_bot
+      - traefik.http.routers.mexc_tg_bot.entrypoints=websecure
+      - traefik.http.routers.mexc_tg_bot.tls.certresolver=letsEncrypt
+      - traefik.http.routers.mexc_tg_bot.rule=Host(`mex-tg-bot.dimbok.dev`)
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DRY_RUN=${DRY_RUN:-true}
+      - WEBHOOK_URL=https://mex-tg-bot.dimbok.dev
+      - WEBHOOK_PATH=/webhook
+      - ADDRESS=0.0.0.0:8080
+    volumes:
+      - ./data/tg-bot:/app/data
+
+  web-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web-app
+    container_name: mexc-web-app
+    hostname: mexc-web-app
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "500m"
+        max-file: "3"
+    networks:
+      - traefik_backend
+    labels:
+      - traefik.enable=true
+      # Web application
+      - traefik.http.services.mexc_web_app.loadbalancer.server.port=8080
+      - traefik.http.routers.mexc_web_app.service=mexc_web_app
+      - traefik.http.routers.mexc_web_app.entrypoints=websecure
+      - traefik.http.routers.mexc_web_app.tls.certresolver=letsEncrypt
+      - traefik.http.routers.mexc_web_app.rule=Host(`mex-web-bot.dimbok.dev`)
+    environment:
+      - PORT=8080
+      - JWT_SECRET=${JWT_SECRET}
+      - DB_PATH=/app/data/web_app.db
+      - WEB_DIR=/app/web/
+      - DRY_RUN=${DRY_RUN:-true}
+      - MIRROR_URL=https://mex-web-bot.dimbok.dev
+    volumes:
+      - ./data/web-app:/app/data
+
+networks:
+  traefik_backend:
+    external: true

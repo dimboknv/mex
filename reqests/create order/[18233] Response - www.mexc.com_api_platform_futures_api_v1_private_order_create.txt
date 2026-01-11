@@ -1,0 +1,35 @@
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: gzip
+Access-Control-Allow-Origin: https://www.mexc.com
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: POST, DELETE, PUT, GET, OPTIONS
+Access-Control-Allow-Headers: ACCEPT, CONTENT-TYPE, X-MXC-SIGN, X-MXC-NONCE, LANGUAGE, VERSION, trochilus-trace-id, trochilus-uid, Authorization, NONCE, origin, timezone, device-id, platform, is-app, SIGNATURE, REQUEST-TIME, RECV-WINDOW, Pragma, Ucenter-Token, Ucenter-Via, x-web-sign, user-agent, timezone-login, captcha-token, siteSources, X-Device-Id, X-Client, x-language, expires, x-version, n-uuid, x-source, x-signature, n-timestamp, x-requested-with, responseType, mtoken, cs-desk-user-Authorization, cs-desk-customer-Authorization, x-csdesk-tenant-id, x-version-web ,Via-Sub-Mode, x-app-version, x-mini-app-version, x-platform-type
+Access-Control-Expose-Headers: x-cache, cf-cache-status, Content-Disposition
+Content-Length: 101
+Expires: Fri, 02 Jan 2026 20:03:46 GMT
+Cache-Control: max-age=0, no-cache, no-store
+Pragma: no-cache
+Date: Fri, 02 Jan 2026 20:03:46 GMT
+Connection: keep-alive
+Vary: Accept-Encoding
+Server-Timing: cdn-cache; desc=MISS
+Server-Timing: edge; dur=307
+Server-Timing: origin; dur=293
+Report-To: {"group": "nel","max_age": 2592000, "endpoints": [{"url":"https://nel-cf.gotoda.co/nel/report"},{"url":"https://nel-akm.gotoda.co/nel/report"}]}
+NEL: {"report_to": "nel", "max_age": 2592000, "response_headers":["Akami-Grn"] }
+Access-Control-Expose-Headers: x-cache
+X-Cache: NotCacheable from child
+Akamai-GRN: 0.3fad1502.1767384225.164c386f
+Set-Cookie: _abck=DAE5FFB682EC61DB842AFBD67AF698C8~-1~YAAQP60VAi/WdnmbAQAAehlPgA8u8Tc7UWjTJOpnqgCvXE9j+J3TWxoxaNIggKpf7r0BW3vUzuECAeu2Yw0vXD6i5SH0n22TH+clONCcvD5krhgni7sor4E8HQxqTbUaev8v8ywxTdCkn0UGVf8B9WEGfZioX6CbrndZ8fvwQdVVraZnk5561MDYG3wp2Ug8SQu+o2asoRl6SuYJRYP1joAFefsHDyKOSirvDw5AuqbUvpyeGO1UjwPN2lObhmhMGpgz1k8jk3butYMFHg96eMVqStsckScI9g1DaXRGg/UnfXtaz1urwy4olKL1Mm3ywLUTGvDFdqYEw83V9TJYr/ig8Fbue2ut5mPpe2TImQJPKyP0KEej9E4fCg03R73PTT2mwrAAXGzKMDui+oP8hhCU4DHV867e2+bEmKHhaIGlL7iWsfDUuKkNt4VyX1dasHgRcH3e3INHVPln5IsEBfdn0UJNiJbDB6MYDQmyc01TpmY89swzE3sucOHkOcSQHELMr+paY+LMJ8mzMuzUNFzxf45p35Nrz9OmBqdeT4qLfpIbRR/Pf0SYyuchkMO+IN64Ty1UtkpOx9ew0mZ0oPzZsaMsb3MIBq7+6cM5kDYeEGt5/PC7ouKijnYIi1R4WqBcloWeeHao/vY84m225fryWR4vsZWuK1LPZbUsg5c/fdoIOuIEmsPtbz9zNLl8cAh2Nqtsg0u2RxnvxyjodFZhl3+IqPPUSHFibVlVn0GcHPKx23CKcECZcOPTv0lw3qeYP76ihuxjVDuc/uRzAmsW/sDNv1ZN3IIYv65W4SScPhq5NDXzAB2Rvmj77IS3+qOgnFjAbuEkGd5owYVrb+z729OXAm2dt/bayL1jT1lPERG2RKkKvA==~-1~-1~-1~AAQAAAAE%2f%2f%2f%2f%2f3YHuBcxcYTHnLdSiJ9Xgnq+E8J3AXbQwQDHuxe37W5PDkjmue6tJ5AZflAXkBfEJ0bG1HB82TocHLNPTt5uPHs2tqNDGqDmc5e0f6pCA1MuAGHetIhtjK6oPERNc7%2fuEOoOPJhLtxcE9BZYCv3ITmA8Fboox+1M5pNlSWwWJxrpbvf1oJRD4X%2fAdlKvqZQXTPcdkEJirN60~-1; Domain=.mexc.com; Path=/; Expires=Sat, 02 Jan 2027 20:03:46 GMT; Max-Age=31536000; Secure
+Set-Cookie: bm_sv=BFE9F9C66C94CF1688A4B500EF7B824A~YAAQP60VAjDWdnmbAQAAehlPgB56xXV25FWtGuuqKgpw6jtZG83YkPWBreesJL/j/l2M+B3tjRg7oSzQSzqWrx6POThixmPo96ZMCecQhckWVogM+lP0oAuywlckOxEjsEynKH6u9DgV7ldTPBSIVXOR+/Q8kUdQInPA6V7gfo2IYCgOra0dwv393QpE3icymHlKC4bUB6v8/9ASSEVipItnqxUeAEl4H6d04V1Ezare/d0yzYN6X5qSfXg89jVR~1; Domain=.mexc.com; Path=/; Expires=Fri, 02 Jan 2026 21:49:43 GMT; Max-Age=6357; Secure
+Server-Timing: ak_p; desc="1767384225538_34975039_374093935_59974_31251_17_0_-";dur=1
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "orderId": "762163027276548096",
+    "ts": 1767384226022
+  }
+}
