@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   tg-bot:
-    image: ghcr.io/dimboknv/mex:latest
+    image: ghcr.io/dimboknv/mexc:latest
     container_name: mexc-tg-bot
     hostname: mexc-tg-bot
     restart: unless-stopped
@@ -20,18 +20,17 @@ services:
       - traefik.http.routers.mexc_tg_bot.service=mexc_tg_bot
       - traefik.http.routers.mexc_tg_bot.entrypoints=websecure
       - traefik.http.routers.mexc_tg_bot.tls.certresolver=letsEncrypt
-      - traefik.http.routers.mexc_tg_bot.rule=Host(`mex-tg-bot.dimbok.dev`)
+      - traefik.http.routers.mexc_tg_bot.rule=Host(`mexc-tg-bot.dimbok.dev`)
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DRY_RUN=${DRY_RUN:-true}
-      - WEBHOOK_URL=https://mex-tg-bot.dimbok.dev
-      - WEBHOOK_PATH=/webhook
+      - WEBHOOK_URL=${WEBHOOK_URL}
       - ADDRESS=0.0.0.0:8080
     volumes:
       - ./data/tg-bot:/app/data
 
   web-app:
-    image: ghcr.io/dimboknv/mex:latest
+    image: ghcr.io/dimboknv/mexc:latest
     container_name: mexc-web-app
     hostname: mexc-web-app
     restart: unless-stopped
@@ -49,14 +48,13 @@ services:
       - traefik.http.routers.mexc_web_app.service=mexc_web_app
       - traefik.http.routers.mexc_web_app.entrypoints=websecure
       - traefik.http.routers.mexc_web_app.tls.certresolver=letsEncrypt
-      - traefik.http.routers.mexc_web_app.rule=Host(`mex-web-bot.dimbok.dev`)
+      - traefik.http.routers.mexc_web_app.rule=Host(`mexc-web-bot.dimbok.dev`)
     environment:
-      - PORT=8080
+      - ADDRESS=0.0.0.0:8080
       - JWT_SECRET=${JWT_SECRET}
       - DB_PATH=/app/data/web_app.db
-      - WEB_DIR=/app/web/
       - DRY_RUN=${DRY_RUN:-true}
-      - MIRROR_URL=https://mex-web-bot.dimbok.dev
+      - API_URL=${API_URL}
     volumes:
       - ./data/web-app:/app/data
 

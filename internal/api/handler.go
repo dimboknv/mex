@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
 	"tg_mexc/internal/auth"
 	"tg_mexc/pkg/services/copytrading"
 	"tg_mexc/pkg/storage"
@@ -15,18 +16,18 @@ type Handler struct {
 	authService    *auth.Service
 	copyTradingWeb *copytrading.WebService
 	mirrorManager  *MirrorManager
-	mirrorURL      string
+	apiURL         string
 	logger         *slog.Logger
 }
 
 // New создает новый API handler
-func New(storage *storage.WebStorage, authService *auth.Service, copyTradingWeb *copytrading.WebService, mirrorURL string, logger *slog.Logger) *Handler {
+func New(storage *storage.WebStorage, authService *auth.Service, copyTradingWeb *copytrading.WebService, apiURL string, logger *slog.Logger) *Handler {
 	return &Handler{
 		storage:        storage,
 		authService:    authService,
 		copyTradingWeb: copyTradingWeb,
 		mirrorManager:  NewMirrorManager(logger),
-		mirrorURL:      mirrorURL,
+		apiURL:         apiURL,
 		logger:         logger,
 	}
 }

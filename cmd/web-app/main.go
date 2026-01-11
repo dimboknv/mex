@@ -9,11 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
 	"tg_mexc/internal/api"
 	"tg_mexc/internal/auth"
 	"tg_mexc/pkg/services/copytrading"
 	"tg_mexc/pkg/storage"
-	"time"
 
 	"github.com/lmittmann/tint"
 )
@@ -46,12 +47,6 @@ func main() {
 
 	logger.Info("=== MEXC Copy Trading Web App ===")
 
-	// Загрузка конфигурации из env
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		jwtSecret = "default-secret-change-me-in-production" // В продакшене использовать настоящий секрет!
@@ -64,15 +59,17 @@ func main() {
 		dbPath = "./web_app.db"
 	}
 
-	webDir := os.Getenv("WEB_DIR")
-	if webDir == "" {
-		webDir = "../../web/" // По умолчанию из cmd/web-app
+	address := os.Getenv("ADDRESS")
+	if address == "" {
+		address = ":8080"
 	}
 
-	mirrorURL := os.Getenv("MIRROR_URL")
-	if mirrorURL == "" {
-		mirrorURL = "http://localhost:" + port // По умолчанию используем текущий сервер
+	// API URL для frontend и mirror скрипта
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:8080"
 	}
+	logger.Info("API URL configured", slog.String("url", apiURL))
 
 	// Проверяем DRY_RUN флаг
 	dryRun := true
@@ -99,14 +96,14 @@ func main() {
 	copyTradingService := copytrading.NewWebService(webStorage, logger, dryRun)
 
 	// Инициализация API handler
-	apiHandler := api.New(webStorage, authService, copyTradingService, mirrorURL, logger)
+	apiHandler := api.New(webStorage, authService, copyTradingService, apiURL, logger)
 
-	// Настройка роутинга
-	router := apiHandler.SetupRouter(webDir)
+	// Настройка роутинга (статика встроена через go:embed)
+	router := apiHandler.SetupRouter()
 
 	// HTTP сервер
 	srv := &http.Server{
-		Addr:         ":" + port,
+		Addr:         address,
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -115,9 +112,8 @@ func main() {
 
 	// Запускаем сервер в горутине
 	go func() {
-		logger.Info("🚀 Server starting...", slog.String("port", port))
-		logger.Info(fmt.Sprintf("📡 API available at http://localhost:%s/api", port))
-		logger.Info(fmt.Sprintf("🏥 Health check at http://localhost:%s/health", port))
+		logger.Info("🚀 Server starting...", slog.String("address", address))
+		logger.Info(fmt.Sprintf("📡 API available at ", apiURL))
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server failed to start", slog.Any("error", err))

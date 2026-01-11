@@ -1,14 +1,17 @@
 package api
 
 import (
+	"io/fs"
 	"net/http"
+
 	"tg_mexc/internal/middleware"
+	"tg_mexc/web"
 
 	"github.com/gorilla/mux"
 )
 
 // SetupRouter настраивает роутинг для API
-func (h *Handler) SetupRouter(webDir string) *mux.Router {
+func (h *Handler) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
 
 	// Применяем CORS middleware ко всем маршрутам
@@ -18,6 +21,7 @@ func (h *Handler) SetupRouter(webDir string) *mux.Router {
 	r.HandleFunc("/api/auth/login", h.HandleLogin).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/register", h.HandleRegister).Methods("POST", "OPTIONS")
 	r.HandleFunc("/health", h.HandleHealth).Methods("GET")
+	r.HandleFunc("/config.js", h.HandleConfigJS).Methods("GET")
 
 	// Защищенные маршруты (требуют аутентификации)
 	api := r.PathPrefix("/api").Subrouter()
@@ -53,8 +57,9 @@ func (h *Handler) SetupRouter(webDir string) *mux.Router {
 	// Эти маршруты обрабатывают запросы от browser mirror скрипта
 	r.PathPrefix("/api/platform/futures/").HandlerFunc(h.HandleMirrorAPI).Methods("POST", "OPTIONS")
 
-	// Статические файлы (должны быть в конце)
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir(webDir)))
+	// Статические файлы из embedded FS (должны быть в конце)
+	staticFS, _ := fs.Sub(web.StaticFiles, ".")
+	r.PathPrefix("/").Handler(http.FileServer(http.FS(staticFS)))
 
 	return r
 }
@@ -64,4 +69,16 @@ func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	h.respondSuccess(w, "OK", map[string]string{
 		"status": "healthy",
 	})
+}
+
+// HandleConfigJS возвращает JavaScript конфигурацию для frontend
+func (h *Handler) HandleConfigJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	js := `window.APP_CONFIG = {
+    API_URL: "` + h.apiURL + `"
+};`
+
+	w.Write([]byte(js))
 }

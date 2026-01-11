@@ -449,12 +449,12 @@ func (h *Handler) HandleGetMirrorScript(w http.ResponseWriter, r *http.Request) 
 	// Генерируем токен для пользователя
 	token := h.mirrorManager.GenerateToken(userID, username)
 
-	script := generateMirrorScript(h.mirrorURL, token)
+	script := generateMirrorScript(h.apiURL, token)
 
 	h.respondSuccess(w, "", map[string]string{
 		"script":     script,
 		"token":      token,
-		"mirror_url": h.mirrorURL,
+		"mirror_url": h.apiURL,
 	})
 }
 

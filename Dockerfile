@@ -43,11 +43,8 @@ RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy binary from builder
+# Copy binary from builder (web static files are embedded via go:embed)
 COPY --from=builder /web_app /app/web_app
-
-# Copy web static files
-COPY web/ /app/web/
 
 # Create directory for data
 RUN mkdir -p /app/data

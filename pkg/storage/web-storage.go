@@ -211,6 +211,19 @@ func (s *WebStorage) GetUserByID(id int) (*models.User, error) {
 
 // === Account Management ===
 
+// AccountExistsByMexcUID проверяет, существует ли аккаунт с таким MEXC UID
+func (s *WebStorage) AccountExistsByMexcUID(userID int, mexcUID string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM accounts
+		WHERE user_id = ? AND user_id_mexc = ?
+	`, userID, mexcUID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // AddAccount добавляет аккаунт для пользователя
 func (s *WebStorage) AddAccount(userID int, name string, data models.BrowserData, proxy string) error {
 	cookiesJSON, _ := json.Marshal(data.AllCookies)

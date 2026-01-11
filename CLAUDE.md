@@ -37,10 +37,10 @@ go mod tidy
 - `DRY_RUN` - `true` (default) for simulation, `false` for real trades
 
 **Web App:**
-- `PORT` - HTTP port (default: 8080)
+- `ADDRESS` - Listen address (default: `:8080`)
 - `JWT_SECRET` - JWT signing key (required in production)
 - `DB_PATH` - SQLite database path (default: `./web_app.db`)
-- `WEB_DIR` - Frontend static files directory (default: `../../web/`)
+- `API_URL` - Base URL for frontend and mirror script (default: `http://localhost:8080`)
 - `DRY_RUN` - `true` (default) for simulation, `false` for real trades
 
 ## Architecture

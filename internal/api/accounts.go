@@ -137,8 +137,20 @@ func (h *Handler) HandleAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Проверяем, существует ли уже аккаунт с таким MEXC UID
+	exists, err := h.storage.AccountExistsByMexcUID(userID, req.BrowserData.UID)
+	if err != nil {
+		h.logger.Error("Failed to check account existence", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Failed to check account existence")
+		return
+	}
+	if exists {
+		h.respondError(w, http.StatusConflict, "Account with this MEXC UID already exists")
+		return
+	}
+
 	// Добавляем аккаунт
-	err := h.storage.AddAccount(userID, req.Name, req.BrowserData, req.Proxy)
+	err = h.storage.AddAccount(userID, req.Name, req.BrowserData, req.Proxy)
 	if err != nil {
 		h.logger.Error("Failed to add account", "error", err)
 		h.respondError(w, http.StatusInternalServerError, "Failed to add account")
