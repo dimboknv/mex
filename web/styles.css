@@ -541,3 +541,104 @@ body {
     margin-bottom: 10px;
     color: #333;
 }
+
+/* Mode Selector */
+.copy-trading-mode-selector {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.copy-trading-mode-selector h3 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mode-option {
+    display: flex;
+    align-items: flex-start;
+    padding: 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mode-option:hover {
+    border-color: #667eea;
+    background: #f8f9ff;
+}
+
+.mode-option input[type="radio"] {
+    margin-right: 15px;
+    margin-top: 3px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.mode-option input[type="radio"]:checked + .mode-label {
+    color: #667eea;
+}
+
+.mode-option:has(input:checked) {
+    border-color: #667eea;
+    background: #f0f3ff;
+}
+
+.mode-label {
+    display: flex;
+    flex-direction: column;
+}
+
+.mode-label strong {
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+
+.mode-label small {
+    color: #666;
+    font-size: 13px;
+}
+
+/* Mode Settings */
+.mode-settings {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.mode-settings h4 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    color: #666;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+/* Warning text */
+.warning {
+    color: #f39c12;
+    font-weight: 500;
+}

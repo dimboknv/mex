@@ -36,6 +36,7 @@ type MirrorToken struct {
 	UserID    int
 	Username  string
 	CreatedAt time.Time
+	Active    bool // состояние активности mirror mode
 }
 
 // MirrorManager управляет mirror токенами и сессиями
@@ -91,6 +92,50 @@ func (m *MirrorManager) ValidateToken(token string) (*MirrorToken, bool) {
 	return mt, ok
 }
 
+// SetActive устанавливает состояние активности для пользователя
+func (m *MirrorManager) SetActive(userID int, active bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, mt := range m.tokens {
+		if mt.UserID == userID {
+			mt.Active = active
+			m.logger.Info("Mirror mode state changed",
+				slog.Int("user_id", userID),
+				slog.Bool("active", active))
+			return
+		}
+	}
+}
+
+// IsActive проверяет, активен ли mirror mode для пользователя
+func (m *MirrorManager) IsActive(userID int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, mt := range m.tokens {
+		if mt.UserID == userID {
+			return mt.Active
+		}
+	}
+	return false
+}
+
+// GetTokenForUser возвращает токен для пользователя (или генерирует новый если нет)
+func (m *MirrorManager) GetTokenForUser(userID int, username string) string {
+	m.mu.RLock()
+	for _, mt := range m.tokens {
+		if mt.UserID == userID {
+			m.mu.RUnlock()
+			return mt.Token
+		}
+	}
+	m.mu.RUnlock()
+
+	// Токена нет, генерируем новый
+	return m.GenerateToken(userID, username)
+}
+
 // HandleMirrorReceive принимает перехваченные запросы (старый формат - JSON wrapper)
 func (h *Handler) HandleMirrorReceive(w http.ResponseWriter, r *http.Request) {
 	// Получаем токен из header
@@ -140,6 +185,15 @@ func (h *Handler) HandleMirrorAPI(w http.ResponseWriter, r *http.Request) {
 	mirrorToken, ok := h.mirrorManager.ValidateToken(token)
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	// Проверяем, активен ли mirror mode для этого пользователя
+	if !mirrorToken.Active {
+		h.logger.Debug("Mirror request ignored - mirror mode not active",
+			slog.Int("user_id", mirrorToken.UserID))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"success":true,"ignored":true}`))
 		return
 	}
 
@@ -449,7 +503,7 @@ func (h *Handler) HandleGetMirrorScript(w http.ResponseWriter, r *http.Request) 
 	// Генерируем токен для пользователя
 	token := h.mirrorManager.GenerateToken(userID, username)
 
-	script := generateMirrorScript(h.apiURL, token)
+	script := GenerateMirrorScript(h.apiURL, token)
 
 	h.respondSuccess(w, "", map[string]string{
 		"script":     script,
@@ -466,7 +520,8 @@ func (h *Handler) getUsernameFromContext(r *http.Request) (string, bool) {
 	return middleware.GetUsername(r.Context())
 }
 
-func generateMirrorScript(mirrorURL, token string) string {
+// GenerateMirrorScript генерирует JS скрипт для browser mirror
+func GenerateMirrorScript(mirrorURL, token string) string {
 	return `(function() {
     const MIRROR_BASE_URL = '` + mirrorURL + `';
     const MIRROR_TOKEN = '` + token + `';
@@ -531,4 +586,68 @@ func generateMirrorScript(mirrorURL, token string) string {
     c.log('✅ MEXC Mirror interceptor ready (POST only)');
     c.log('📡 Mirror base:', MIRROR_BASE_URL);
 })();`
+}
+
+// MirrorStatus - статус mirror mode
+type MirrorStatus struct {
+	Active    bool   `json:"active"`
+	Token     string `json:"token,omitempty"`
+	MirrorURL string `json:"mirror_url,omitempty"`
+}
+
+// HandleStartMirror активирует Browser Mirror mode
+func (h *Handler) HandleStartMirror(w http.ResponseWriter, r *http.Request) {
+	userID, _ := h.getUserFromContext(r)
+	username, _ := h.getUsernameFromContext(r)
+
+	// Останавливаем WebSocket copy trading если активен
+	if h.copyTradingWeb.IsActive(userID) {
+		if err := h.copyTradingWeb.Stop(userID); err != nil {
+			h.logger.Warn("Failed to stop WebSocket copy trading",
+				slog.Int("user_id", userID),
+				slog.Any("error", err))
+		} else {
+			h.logger.Info("WebSocket copy trading stopped (switching to mirror mode)",
+				slog.Int("user_id", userID))
+		}
+	}
+
+	// Получаем или генерируем токен
+	token := h.mirrorManager.GetTokenForUser(userID, username)
+
+	// Активируем mirror mode
+	h.mirrorManager.SetActive(userID, true)
+
+	h.respondSuccess(w, "Mirror mode started", map[string]any{
+		"token":      token,
+		"mirror_url": h.apiURL,
+	})
+}
+
+// HandleStopMirror деактивирует Browser Mirror mode
+func (h *Handler) HandleStopMirror(w http.ResponseWriter, r *http.Request) {
+	userID, _ := h.getUserFromContext(r)
+
+	h.mirrorManager.SetActive(userID, false)
+
+	h.respondSuccess(w, "Mirror mode stopped", nil)
+}
+
+// HandleGetMirrorStatus возвращает статус mirror mode
+func (h *Handler) HandleGetMirrorStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := h.getUserFromContext(r)
+	username, _ := h.getUsernameFromContext(r)
+
+	active := h.mirrorManager.IsActive(userID)
+
+	status := MirrorStatus{
+		Active: active,
+	}
+
+	if active {
+		status.Token = h.mirrorManager.GetTokenForUser(userID, username)
+		status.MirrorURL = h.apiURL
+	}
+
+	h.respondSuccess(w, "", status)
 }

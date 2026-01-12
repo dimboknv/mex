@@ -27,7 +27,6 @@
             <div class="nav-menu">
                 <a href="#" class="nav-item active" data-page="accounts">Аккаунты</a>
                 <a href="#" class="nav-item" data-page="copytrading">Copy Trading</a>
-                <a href="#" class="nav-item" data-page="mirror">Browser Mirror</a>
                 <a href="#" class="nav-item" data-page="trades">История сделок</a>
                 <a href="#" class="nav-item" data-page="logs">Логи</a>
             </div>
@@ -49,53 +48,74 @@
             <div id="accounts-list"></div>
         </div>
 
-        <!-- Copy Trading Page -->
+        <!-- Copy Trading Page (Unified) -->
         <div class="page" id="page-copytrading">
             <div class="page-header">
-                <h2>🔄 Copy Trading</h2>
+                <h2>Copy Trading</h2>
             </div>
-            <div class="copy-trading-status">
-                <div class="status-card">
-                    <h3>Статус</h3>
-                    <div id="copy-status-display"></div>
-                </div>
-                <div class="copy-trading-controls">
-                    <button id="start-copy-btn" class="btn-success">Запустить Copy Trading</button>
-                    <button id="stop-copy-btn" class="btn-danger hidden">Остановить Copy Trading</button>
-                    <label>
-                        <input type="checkbox" id="ignore-fees-checkbox">
-                        Игнорировать комиссии
+
+            <!-- Mode Selection -->
+            <div class="copy-trading-mode-selector">
+                <h3>Режим работы</h3>
+                <div class="mode-options">
+                    <label class="mode-option">
+                        <input type="radio" name="copy-mode" value="off" checked>
+                        <span class="mode-label">
+                            <strong>Выключено</strong>
+                            <small>Copy trading не активен</small>
+                        </span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="copy-mode" value="websocket">
+                        <span class="mode-label">
+                            <strong>WebSocket Mode</strong>
+                            <small>Слушает мастер-аккаунт через WebSocket</small>
+                        </span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="copy-mode" value="mirror">
+                        <span class="mode-label">
+                            <strong>Browser Mirror</strong>
+                            <small>Перехват запросов из браузера</small>
+                        </span>
                     </label>
                 </div>
             </div>
-        </div>
 
-        <!-- Browser Mirror Page -->
-        <div class="page" id="page-mirror">
-            <div class="page-header">
-                <h2>🔄 Browser Mirror</h2>
+            <!-- Status Card -->
+            <div class="copy-trading-status">
+                <div class="status-card">
+                    <h3>Статус</h3>
+                    <div id="copy-status-display">
+                        <p><strong>Режим:</strong> Выключено</p>
+                    </div>
+                </div>
             </div>
-            <div class="mirror-content">
+
+            <!-- WebSocket Mode Options (hidden by default) -->
+            <div class="mode-settings hidden" id="websocket-settings">
+                <h4>Настройки WebSocket Mode</h4>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="ignore-fees-checkbox">
+                    Игнорировать комиссии (копировать на все аккаунты)
+                </label>
+            </div>
+
+            <!-- Mirror Mode Options (hidden by default) -->
+            <div class="mode-settings hidden" id="mirror-settings">
+                <h4>Browser Mirror Script</h4>
                 <div class="mirror-info">
-                    <h3>Как это работает?</h3>
+                    <p>Инструкция:</p>
                     <ol>
-                        <li>Скопируйте JS код ниже</li>
                         <li>Откройте MEXC Futures в браузере</li>
                         <li>Откройте DevTools (F12) → Console</li>
-                        <li>Вставьте код и нажмите Enter</li>
-                        <li>Все запросы к API будут отправляться на сервер</li>
+                        <li>Скопируйте и вставьте код ниже</li>
                     </ol>
-                    <p class="hint">⚠️ Код нужно вставлять заново при перезагрузке страницы</p>
+                    <p class="hint">Код нужно вставлять заново при перезагрузке страницы</p>
                 </div>
                 <div class="mirror-script-box">
-                    <h4>Ваш персональный JS код:</h4>
                     <pre id="mirror-script-code">Загрузка...</pre>
-                    <button id="copy-mirror-script-btn" class="btn-primary">📋 Копировать код</button>
-                    <button id="refresh-mirror-script-btn" class="btn-secondary">🔄 Обновить токен</button>
-                </div>
-                <div class="mirror-status">
-                    <h4>Статус:</h4>
-                    <p id="mirror-status-text">Ожидание данных...</p>
+                    <button id="copy-mirror-script-btn" class="btn-primary">Копировать код</button>
                 </div>
             </div>
         </div>

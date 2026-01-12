@@ -49,17 +49,17 @@ function setupEventListeners() {
     document.getElementById('add-account-form').addEventListener('submit', handleAddAccount);
     document.getElementById('copy-script-btn').addEventListener('click', copyScript);
 
-    // Copy Trading
-    document.getElementById('start-copy-btn').addEventListener('click', handleStartCopyTrading);
-    document.getElementById('stop-copy-btn').addEventListener('click', handleStopCopyTrading);
+    // Copy Trading Mode Selection
+    document.querySelectorAll('input[name="copy-mode"]').forEach(radio => {
+        radio.addEventListener('change', handleModeChange);
+    });
+
+    // Mirror script copy button
+    document.getElementById('copy-mirror-script-btn').addEventListener('click', copyMirrorScript);
 
     // Trades & Logs
     document.getElementById('refresh-trades-btn').addEventListener('click', loadTrades);
     document.getElementById('refresh-logs-btn').addEventListener('click', loadLogs);
-
-    // Mirror
-    document.getElementById('copy-mirror-script-btn').addEventListener('click', copyMirrorScript);
-    document.getElementById('refresh-mirror-script-btn').addEventListener('click', loadMirrorScript);
 }
 
 // Auth Functions
@@ -175,8 +175,7 @@ function switchPage(page) {
         loadAccounts();
         startBalancesAutoRefresh();
     }
-    if (page === 'copytrading') loadCopyTradingStatus();
-    if (page === 'mirror') loadMirrorScript();
+    if (page === 'copytrading') loadUnifiedStatus();
     if (page === 'trades') loadTrades();
     if (page === 'logs') loadLogs();
 }
@@ -367,81 +366,113 @@ function copyScript() {
     alert('Скрипт скопирован в буфер обмена!');
 }
 
-// Copy Trading
-async function loadCopyTradingStatus() {
+// Copy Trading (Unified)
+async function loadUnifiedStatus() {
     try {
-        const response = await fetch(`${API_URL}/api/copy-trading/status`, {
+        const response = await fetch(`${API_URL}/api/copy-trading/unified-status`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
 
         const data = await response.json();
 
         if (response.ok) {
-            renderCopyTradingStatus(data.data);
+            renderUnifiedStatus(data.data);
         }
     } catch (error) {
-        console.error('Failed to load copy trading status:', error);
+        console.error('Failed to load unified status:', error);
     }
 }
 
-function renderCopyTradingStatus(status) {
+function renderUnifiedStatus(status) {
     const display = document.getElementById('copy-status-display');
-    const startBtn = document.getElementById('start-copy-btn');
-    const stopBtn = document.getElementById('stop-copy-btn');
+    const websocketSettings = document.getElementById('websocket-settings');
+    const mirrorSettings = document.getElementById('mirror-settings');
 
-    if (status.active) {
-        display.innerHTML = `
-            <p><strong>Статус:</strong> ✅ Активен</p>
-            <p><strong>Master:</strong> ${status.master_name}</p>
-            <p><strong>Active Slaves:</strong> ${status.active_slave_count}</p>
-        `;
-        startBtn.classList.add('hidden');
-        stopBtn.classList.remove('hidden');
-    } else {
-        display.innerHTML = '<p><strong>Статус:</strong> ⏸️ Не активен</p>';
-        startBtn.classList.remove('hidden');
-        stopBtn.classList.add('hidden');
+    // Set radio button
+    const radio = document.querySelector(`input[name="copy-mode"][value="${status.mode}"]`);
+    if (radio) radio.checked = true;
+
+    // Show/hide settings based on mode
+    websocketSettings.classList.toggle('hidden', status.mode !== 'websocket');
+    mirrorSettings.classList.toggle('hidden', status.mode !== 'mirror');
+
+    // Update status display
+    let statusHtml = '';
+    const modeLabels = {
+        'off': 'Выключено',
+        'websocket': 'WebSocket Mode',
+        'mirror': 'Browser Mirror'
+    };
+
+    statusHtml = `<p><strong>Режим:</strong> ${modeLabels[status.mode] || status.mode}</p>`;
+
+    if (status.mode !== 'off') {
+        if (status.master_name) {
+            statusHtml += `<p><strong>Master:</strong> ${status.master_name}</p>`;
+        }
+        statusHtml += `<p><strong>Active Slaves:</strong> ${status.active_slave_count}</p>`;
+        if (status.dry_run) {
+            statusHtml += `<p class="warning">DRY RUN режим (тестирование)</p>`;
+        }
     }
+
+    if (status.mode === 'mirror' && status.mirror_script) {
+        document.getElementById('mirror-script-code').textContent = status.mirror_script;
+    }
+
+    display.innerHTML = statusHtml;
 }
 
-async function handleStartCopyTrading() {
-    console.log('handleStartCopyTrading called');
-    const ignoreFees = document.getElementById('ignore-fees-checkbox').checked;
-    console.log('ignoreFees:', ignoreFees);
+async function handleModeChange(e) {
+    const newMode = e.target.value;
+    console.log('Mode changed to:', newMode);
 
     try {
-        const response = await fetch(`${API_URL}/api/copy-trading/start`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ ignore_fees: ignoreFees })
-        });
+        if (newMode === 'off') {
+            // Stop both modes
+            await fetch(`${API_URL}/api/copy-trading/stop`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            await fetch(`${API_URL}/api/mirror/stop`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+        } else if (newMode === 'websocket') {
+            const ignoreFees = document.getElementById('ignore-fees-checkbox').checked;
+            const response = await fetch(`${API_URL}/api/copy-trading/start`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ ignore_fees: ignoreFees })
+            });
 
-        if (response.ok) {
-            loadCopyTradingStatus();
-        } else {
-            const data = await response.json();
-            alert('Error: ' + (data.error || 'Failed to start copy trading'));
+            if (!response.ok) {
+                const data = await response.json();
+                alert('Error: ' + (data.error || 'Failed to start WebSocket mode'));
+                loadUnifiedStatus(); // Reload to revert radio
+                return;
+            }
+        } else if (newMode === 'mirror') {
+            const response = await fetch(`${API_URL}/api/mirror/start`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                alert('Error: ' + (data.error || 'Failed to start Mirror mode'));
+                loadUnifiedStatus(); // Reload to revert radio
+                return;
+            }
         }
-    } catch (error) {
-        console.error('Failed to start copy trading:', error);
-    }
-}
 
-async function handleStopCopyTrading() {
-    try {
-        const response = await fetch(`${API_URL}/api/copy-trading/stop`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        if (response.ok) {
-            loadCopyTradingStatus();
-        }
+        loadUnifiedStatus();
     } catch (error) {
-        console.error('Failed to stop copy trading:', error);
+        console.error('Failed to change mode:', error);
+        loadUnifiedStatus(); // Reload to revert radio
     }
 }
 
@@ -489,28 +520,7 @@ function renderTrades(trades) {
     `).join('');
 }
 
-// Mirror
-async function loadMirrorScript() {
-    try {
-        const response = await fetch(`${API_URL}/api/mirror/script`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            document.getElementById('mirror-script-code').textContent = data.data.script;
-            document.getElementById('mirror-status-text').textContent =
-                `Token: ${data.data.token.substring(0, 8)}... | URL: ${data.data.mirror_url}`;
-        } else if (response.status === 401) {
-            handleLogout();
-        }
-    } catch (error) {
-        console.error('Failed to load mirror script:', error);
-        document.getElementById('mirror-script-code').textContent = 'Ошибка загрузки скрипта';
-    }
-}
-
+// Mirror (copy button handler)
 function copyMirrorScript() {
     const script = document.getElementById('mirror-script-code').textContent;
     navigator.clipboard.writeText(script);

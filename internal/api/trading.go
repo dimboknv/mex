@@ -30,6 +30,13 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Останавливаем Mirror mode если активен
+	if h.mirrorManager.IsActive(userID) {
+		h.mirrorManager.SetActive(userID, false)
+		h.logger.Info("Mirror mode stopped (switching to WebSocket copy trading)",
+			"user_id", userID)
+	}
+
 	// Проверяем наличие мастер аккаунта
 	master, err := h.storage.GetMasterAccount(userID)
 	if err != nil {
@@ -179,4 +186,59 @@ func (h *Handler) HandleGetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.respondSuccess(w, "", logs)
+}
+
+// UnifiedCopyTradingStatus - объединенный статус copy trading
+type UnifiedCopyTradingStatus struct {
+	Mode             string `json:"mode"` // "off", "websocket", "mirror"
+	MasterAccountID  int    `json:"master_account_id,omitempty"`
+	MasterName       string `json:"master_name,omitempty"`
+	ActiveSlaveCount int    `json:"active_slave_count"`
+	IgnoreFees       bool   `json:"ignore_fees"`
+	DryRun           bool   `json:"dry_run"`
+	// Mirror-specific fields
+	MirrorToken string `json:"mirror_token,omitempty"`
+	MirrorURL   string `json:"mirror_url,omitempty"`
+	// Script for mirror mode
+	MirrorScript string `json:"mirror_script,omitempty"`
+}
+
+// HandleGetUnifiedStatus возвращает объединенный статус copy trading
+func (h *Handler) HandleGetUnifiedStatus(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+	username, _ := middleware.GetUsername(r.Context())
+
+	status := UnifiedCopyTradingStatus{
+		Mode:   "off",
+		DryRun: h.copyTradingWeb.IsDryRun(),
+	}
+
+	// Получаем мастер аккаунт
+	master, err := h.storage.GetMasterAccount(userID)
+	if err == nil {
+		status.MasterAccountID = master.ID
+		status.MasterName = master.Name
+
+		// Получаем активные slave аккаунты
+		slaves, _ := h.storage.GetSlaveAccounts(userID, false)
+		status.ActiveSlaveCount = len(slaves)
+	}
+
+	// Проверяем WebSocket mode
+	if h.copyTradingWeb.IsActive(userID) {
+		status.Mode = "websocket"
+		_, slaveCount, ignoreFees, isDryRun := h.copyTradingWeb.GetStatus(userID)
+		status.ActiveSlaveCount = slaveCount
+		status.IgnoreFees = ignoreFees
+		status.DryRun = isDryRun
+	} else if h.mirrorManager.IsActive(userID) {
+		// Проверяем Mirror mode
+		status.Mode = "mirror"
+		token := h.mirrorManager.GetTokenForUser(userID, username)
+		status.MirrorToken = token
+		status.MirrorURL = h.apiURL
+		status.MirrorScript = GenerateMirrorScript(h.apiURL, token)
+	}
+
+	h.respondSuccess(w, "", status)
 }

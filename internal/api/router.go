@@ -40,6 +40,7 @@ func (h *Handler) SetupRouter() *mux.Router {
 	api.HandleFunc("/copy-trading/start", h.HandleStartCopyTrading).Methods("POST")
 	api.HandleFunc("/copy-trading/stop", h.HandleStopCopyTrading).Methods("POST")
 	api.HandleFunc("/copy-trading/status", h.HandleGetCopyTradingStatus).Methods("GET")
+	api.HandleFunc("/copy-trading/unified-status", h.HandleGetUnifiedStatus).Methods("GET")
 
 	// Trades History
 	api.HandleFunc("/trades", h.HandleGetTrades).Methods("GET")
@@ -49,6 +50,9 @@ func (h *Handler) SetupRouter() *mux.Router {
 
 	// Mirror (Browser Copy Trading)
 	api.HandleFunc("/mirror/script", h.HandleGetMirrorScript).Methods("GET")
+	api.HandleFunc("/mirror/start", h.HandleStartMirror).Methods("POST")
+	api.HandleFunc("/mirror/stop", h.HandleStopMirror).Methods("POST")
+	api.HandleFunc("/mirror/status", h.HandleGetMirrorStatus).Methods("GET")
 
 	// Mirror receive endpoint (публичный, использует токен в header)
 	r.HandleFunc("/api/mirror/receive", h.HandleMirrorReceive).Methods("POST", "OPTIONS")
