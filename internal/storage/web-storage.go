@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	models2 "tg_mexc/internal/models"
@@ -149,6 +150,19 @@ CREATE TABLE if NOT EXISTS copy_trading_sessions (
 
 CREATE INDEX if NOT EXISTS idx_sessions_user ON copy_trading_sessions(user_id);
 CREATE INDEX if NOT EXISTS idx_sessions_active ON copy_trading_sessions(is_active);
+
+-- Refresh Tokens
+CREATE TABLE if NOT EXISTS refresh_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX if NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+CREATE INDEX if NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 `
 
 	_, err := s.db.Exec(migrationSQL)
@@ -524,6 +538,194 @@ func (s *WebStorage) GetTrades(userID int, limit, offset int) ([]models2.Trade, 
 	return trades, nil
 }
 
+// GetTradesFeed получает ленту сделок с фильтрацией по аккаунтам
+func (s *WebStorage) GetTradesFeed(userID int, accountIDs []int, limit int) ([]models2.Trade, error) {
+	var query string
+	var args []interface{}
+
+	if len(accountIDs) == 0 {
+		// Все аккаунты пользователя
+		query = `
+			SELECT t.id, t.user_id, t.master_account_id, coalesce(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
+			       coalesce(t.action, ''), t.sent_at, t.received_at, t.exchange_accepted_at, t.status, coalesce(t.error, ''), t.created_at
+			FROM trades t
+			LEFT JOIN accounts a ON t.master_account_id = a.id
+			WHERE t.user_id = ?
+			ORDER BY t.sent_at DESC
+			LIMIT ?
+		`
+		args = []interface{}{userID, limit}
+	} else {
+		// Фильтр по выбранным аккаунтам (master или slave)
+		placeholders := make([]string, len(accountIDs))
+		for i := range accountIDs {
+			placeholders[i] = "?"
+		}
+		inClause := "(" + strings.Join(placeholders, ",") + ")"
+
+		query = `
+			SELECT DISTINCT t.id, t.user_id, t.master_account_id, coalesce(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
+			       coalesce(t.action, ''), t.sent_at, t.received_at, t.exchange_accepted_at, t.status, coalesce(t.error, ''), t.created_at
+			FROM trades t
+			LEFT JOIN accounts a ON t.master_account_id = a.id
+			LEFT JOIN trade_details td ON t.id = td.trade_id
+			WHERE t.user_id = ? AND (t.master_account_id IN ` + inClause + ` OR td.account_id IN ` + inClause + `)
+			ORDER BY t.sent_at DESC
+			LIMIT ?
+		`
+		args = append(args, userID)
+		for _, id := range accountIDs {
+			args = append(args, id)
+		}
+		for _, id := range accountIDs {
+			args = append(args, id)
+		}
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var trades []models2.Trade
+	for rows.Next() {
+		var trade models2.Trade
+		err := rows.Scan(
+			&trade.ID, &trade.UserID, &trade.MasterAccountID, &trade.MasterAccountName,
+			&trade.Symbol, &trade.Side, &trade.Volume, &trade.Leverage,
+			&trade.Action, &trade.SentAt, &trade.ReceivedAt, &trade.ExchangeAcceptedAt,
+			&trade.Status, &trade.Error, &trade.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Загружаем детали (фильтруем по выбранным аккаунтам если нужно)
+		if len(accountIDs) > 0 {
+			trade.Details, _ = s.GetTradeDetailsFiltered(trade.ID, accountIDs)
+		} else {
+			trade.Details, _ = s.GetTradeDetails(trade.ID)
+		}
+		trades = append(trades, trade)
+	}
+
+	return trades, nil
+}
+
+// GetTradeDetailsFiltered получает детали сделки с фильтрацией по аккаунтам
+func (s *WebStorage) GetTradeDetailsFiltered(tradeID int, accountIDs []int) ([]models2.TradeDetail, error) {
+	placeholders := make([]string, len(accountIDs))
+	args := []interface{}{tradeID}
+	for i, id := range accountIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	inClause := "(" + strings.Join(placeholders, ",") + ")"
+
+	query := `
+		SELECT td.id, td.trade_id, td.account_id, coalesce(a.name, ''), td.status, coalesce(td.error, ''),
+		       coalesce(td.order_id, ''), coalesce(td.latency_ms, 0), td.created_at
+		FROM trade_details td
+		LEFT JOIN accounts a ON td.account_id = a.id
+		WHERE td.trade_id = ? AND td.account_id IN ` + inClause + `
+		ORDER BY td.id
+	`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var details []models2.TradeDetail
+	for rows.Next() {
+		var detail models2.TradeDetail
+		err := rows.Scan(
+			&detail.ID, &detail.TradeID, &detail.AccountID, &detail.AccountName,
+			&detail.Status, &detail.Error, &detail.OrderID, &detail.LatencyMs, &detail.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		details = append(details, detail)
+	}
+
+	return details, nil
+}
+
+// GetAccountTrades получает историю сделок для конкретного аккаунта
+func (s *WebStorage) GetAccountTrades(userID int, accountID int, isMaster bool, limit int) ([]models2.Trade, error) {
+	var trades []models2.Trade
+
+	if isMaster {
+		// Для мастера - все Trade где он источник
+		rows, err := s.db.Query(`
+			SELECT t.id, t.user_id, t.master_account_id, coalesce(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
+			       coalesce(t.action, ''), t.sent_at, t.received_at, t.exchange_accepted_at, t.status, coalesce(t.error, ''), t.created_at
+			FROM trades t
+			LEFT JOIN accounts a ON t.master_account_id = a.id
+			WHERE t.user_id = ? AND t.master_account_id = ?
+			ORDER BY t.sent_at DESC
+			LIMIT ?
+		`, userID, accountID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var trade models2.Trade
+			err := rows.Scan(
+				&trade.ID, &trade.UserID, &trade.MasterAccountID, &trade.MasterAccountName,
+				&trade.Symbol, &trade.Side, &trade.Volume, &trade.Leverage,
+				&trade.Action, &trade.SentAt, &trade.ReceivedAt, &trade.ExchangeAcceptedAt,
+				&trade.Status, &trade.Error, &trade.CreatedAt,
+			)
+			if err != nil {
+				continue
+			}
+			trade.Details, _ = s.GetTradeDetails(trade.ID)
+			trades = append(trades, trade)
+		}
+	} else {
+		// Для slave - Trade где он участвовал как исполнитель
+		rows, err := s.db.Query(`
+			SELECT DISTINCT t.id, t.user_id, t.master_account_id, coalesce(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
+			       coalesce(t.action, ''), t.sent_at, t.received_at, t.exchange_accepted_at, t.status, coalesce(t.error, ''), t.created_at
+			FROM trades t
+			LEFT JOIN accounts a ON t.master_account_id = a.id
+			INNER JOIN trade_details td ON t.id = td.trade_id
+			WHERE t.user_id = ? AND td.account_id = ?
+			ORDER BY t.sent_at DESC
+			LIMIT ?
+		`, userID, accountID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var trade models2.Trade
+			err := rows.Scan(
+				&trade.ID, &trade.UserID, &trade.MasterAccountID, &trade.MasterAccountName,
+				&trade.Symbol, &trade.Side, &trade.Volume, &trade.Leverage,
+				&trade.Action, &trade.SentAt, &trade.ReceivedAt, &trade.ExchangeAcceptedAt,
+				&trade.Status, &trade.Error, &trade.CreatedAt,
+			)
+			if err != nil {
+				continue
+			}
+			// Только детали для этого аккаунта
+			trade.Details, _ = s.GetTradeDetailsFiltered(trade.ID, []int{accountID})
+			trades = append(trades, trade)
+		}
+	}
+
+	return trades, nil
+}
+
 // GetTradeDetails получает детали сделки
 func (s *WebStorage) GetTradeDetails(tradeID int) ([]models2.TradeDetail, error) {
 	rows, err := s.db.Query(`
@@ -741,6 +943,52 @@ func (s *WebStorage) UpdateDisabledStatusByName(userID int, name string, disable
 	}
 
 	return nil
+}
+
+// === Refresh Tokens ===
+
+// SaveRefreshToken сохраняет refresh token
+func (s *WebStorage) SaveRefreshToken(userID int, token string, expiresAt time.Time) error {
+	_, err := s.db.Exec(`
+		INSERT INTO refresh_tokens (user_id, token, expires_at)
+		VALUES (?, ?, ?)
+	`, userID, token, expiresAt)
+	return err
+}
+
+// GetRefreshToken получает refresh token и проверяет его валидность
+func (s *WebStorage) GetRefreshToken(token string) (userID int, err error) {
+	var expiresAt time.Time
+	err = s.db.QueryRow(`
+		SELECT user_id, expires_at FROM refresh_tokens WHERE token = ?
+	`, token).Scan(&userID, &expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	if time.Now().After(expiresAt) {
+		// Удаляем просроченный токен
+		s.db.Exec("DELETE FROM refresh_tokens WHERE token = ?", token)
+		return 0, sql.ErrNoRows
+	}
+	return userID, nil
+}
+
+// DeleteRefreshToken удаляет refresh token
+func (s *WebStorage) DeleteRefreshToken(token string) error {
+	_, err := s.db.Exec("DELETE FROM refresh_tokens WHERE token = ?", token)
+	return err
+}
+
+// DeleteUserRefreshTokens удаляет все refresh tokens пользователя
+func (s *WebStorage) DeleteUserRefreshTokens(userID int) error {
+	_, err := s.db.Exec("DELETE FROM refresh_tokens WHERE user_id = ?", userID)
+	return err
+}
+
+// CleanupExpiredRefreshTokens удаляет просроченные токены
+func (s *WebStorage) CleanupExpiredRefreshTokens() error {
+	_, err := s.db.Exec("DELETE FROM refresh_tokens WHERE expires_at < ?", time.Now())
+	return err
 }
 
 // Close закрывает соединение с БД

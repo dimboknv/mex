@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"tg_mexc/internal/api/copytrading"
 	"tg_mexc/internal/api/middleware"
+
+	"github.com/gorilla/mux"
 )
 
 // SetModeRequest - запрос на установку режима copy trading
@@ -109,4 +112,66 @@ func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset
 	}
 
 	return limit, offset
+}
+
+// HandleGetTradesFeed возвращает ленту сделок с фильтрацией по аккаунтам
+func (h *Handler) HandleGetTradesFeed(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+
+	// Парсим account_ids из query параметра
+	var accountIDs []int
+	if idsStr := r.URL.Query().Get("account_ids"); idsStr != "" {
+		for _, idStr := range strings.Split(idsStr, ",") {
+			if id, err := strconv.Atoi(strings.TrimSpace(idStr)); err == nil && id > 0 {
+				accountIDs = append(accountIDs, id)
+			}
+		}
+	}
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+			limit = parsed
+		}
+	}
+
+	trades, err := h.storage.GetTradesFeed(userID, accountIDs, limit)
+	if err != nil {
+		h.logger.Error("Failed to get trades feed", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Failed to get trades feed")
+		return
+	}
+
+	h.respondSuccess(w, "", trades)
+}
+
+// HandleGetAccountTrades возвращает историю сделок для конкретного аккаунта
+func (h *Handler) HandleGetAccountTrades(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+
+	vars := mux.Vars(r)
+	accountID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		h.respondError(w, http.StatusBadRequest, "Invalid account ID")
+		return
+	}
+
+	// Проверяем параметр is_master
+	isMaster := r.URL.Query().Get("is_master") == "true"
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	trades, err := h.storage.GetAccountTrades(userID, accountID, isMaster, limit)
+	if err != nil {
+		h.logger.Error("Failed to get account trades", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Failed to get account trades")
+		return
+	}
+
+	h.respondSuccess(w, "", trades)
 }

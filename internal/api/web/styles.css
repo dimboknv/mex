@@ -227,6 +227,21 @@ body {
     background: #7f8c8d;
 }
 
+.btn-info {
+    padding: 10px 20px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s;
+}
+
+.btn-info:hover {
+    background: #2980b9;
+}
+
 .btn-small {
     padding: 5px 10px;
     font-size: 12px;
@@ -293,6 +308,21 @@ body {
 .account-card.disabled {
     opacity: 0.6;
     border: 2px dashed #95a5a6;
+}
+
+.account-card.selected {
+    border: 2px solid #667eea;
+    background: #f0f3ff;
+}
+
+.account-card {
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.account-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .account-info {
@@ -641,4 +671,180 @@ body {
 .warning {
     color: #f39c12;
     font-weight: 500;
+}
+
+/* Feed Section */
+.feed-section {
+    margin-top: 30px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+}
+
+.feed-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.feed-header h3 {
+    color: #333;
+    margin: 0;
+}
+
+.feed-filter-info {
+    color: #667eea;
+    font-size: 14px;
+    background: #f0f3ff;
+    padding: 4px 12px;
+    border-radius: 12px;
+}
+
+#trades-feed {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.feed-item {
+    padding: 12px;
+    margin-bottom: 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 3px solid #667eea;
+}
+
+.feed-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.feed-item-symbol {
+    font-weight: 600;
+    color: #333;
+}
+
+.feed-item-time {
+    color: #999;
+    font-size: 12px;
+}
+
+.feed-item-details {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #ddd;
+}
+
+.feed-detail {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.feed-detail-name {
+    color: #666;
+}
+
+.feed-detail-status {
+    font-weight: 500;
+}
+
+.feed-detail-status.success {
+    color: #2ecc71;
+}
+
+.feed-detail-status.failed {
+    color: #ff4757;
+}
+
+.feed-empty {
+    text-align: center;
+    color: #999;
+    padding: 30px;
+}
+
+/* Modal Wide */
+.modal-wide {
+    max-width: 900px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #eee;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #333;
+}
+
+/* History Table */
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.history-table th {
+    background: #f8f9fa;
+    color: #666;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.history-table td {
+    font-size: 14px;
+}
+
+.history-table tr:hover {
+    background: #f8f9fa;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.status-badge.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.failed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.status-badge.partial {
+    background: #fff3cd;
+    color: #856404;
 }

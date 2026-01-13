@@ -19,6 +19,8 @@ func (h *Handler) SetupRouter() *mux.Router {
 	// Публичные маршруты (не требуют аутентификации)
 	r.HandleFunc("/api/auth/login", h.HandleLogin).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/auth/register", h.HandleRegister).Methods("POST", "OPTIONS")
+	r.HandleFunc("/api/auth/refresh", h.HandleRefresh).Methods("POST", "OPTIONS")
+	r.HandleFunc("/api/auth/logout", h.HandleLogout).Methods("POST", "OPTIONS")
 	r.HandleFunc("/health", h.HandleHealth).Methods("GET")
 	r.HandleFunc("/config.js", h.HandleConfigJS).Methods("GET")
 
@@ -42,6 +44,10 @@ func (h *Handler) SetupRouter() *mux.Router {
 
 	// Trades History
 	api.HandleFunc("/trades", h.HandleGetTrades).Methods("GET")
+	api.HandleFunc("/trades/feed", h.HandleGetTradesFeed).Methods("GET")
+
+	// Account trades history
+	api.HandleFunc("/accounts/{id:[0-9]+}/trades", h.HandleGetAccountTrades).Methods("GET")
 
 	// Activity Logs
 	api.HandleFunc("/logs", h.HandleGetLogs).Methods("GET")

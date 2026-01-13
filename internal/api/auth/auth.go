@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -22,16 +24,32 @@ type Claims struct {
 
 // Service управляет аутентификацией
 type Service struct {
-	jwtSecret []byte
-	tokenTTL  time.Duration
+	jwtSecret       []byte
+	tokenTTL        time.Duration
+	refreshTokenTTL time.Duration
 }
 
 // NewService создает новый auth сервис
 func NewService(jwtSecret string, tokenTTL time.Duration) *Service {
 	return &Service{
-		jwtSecret: []byte(jwtSecret),
-		tokenTTL:  tokenTTL,
+		jwtSecret:       []byte(jwtSecret),
+		tokenTTL:        tokenTTL,
+		refreshTokenTTL: 7 * 24 * time.Hour, // 7 дней
 	}
+}
+
+// GenerateRefreshToken генерирует случайный refresh token
+func (s *Service) GenerateRefreshToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// RefreshTokenTTL возвращает время жизни refresh token
+func (s *Service) RefreshTokenTTL() time.Duration {
+	return s.refreshTokenTTL
 }
 
 // HashPassword хеширует пароль

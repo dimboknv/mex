@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 )
 
 type LoginRequest struct {
@@ -13,9 +14,19 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token    string `json:"token"`
-	Username string `json:"username"`
-	UserID   int    `json:"user_id"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+	Username     string `json:"username"`
+	UserID       int    `json:"user_id"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+type RefreshResponse struct {
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type RegisterRequest struct {
@@ -66,10 +77,29 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Генерируем refresh token
+	refreshToken, err := h.authService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Error("Failed to generate refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+
+		return
+	}
+
+	// Сохраняем refresh token в БД
+	expiresAt := time.Now().Add(h.authService.RefreshTokenTTL())
+	if err := h.storage.SaveRefreshToken(user.ID, refreshToken, expiresAt); err != nil {
+		h.logger.Error("Failed to save refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+
+		return
+	}
+
 	h.respondSuccess(w, "Login successful", LoginResponse{
-		Token:    token,
-		Username: user.Username,
-		UserID:   user.ID,
+		Token:        token,
+		RefreshToken: refreshToken,
+		Username:     user.Username,
+		UserID:       user.ID,
 	})
 }
 
@@ -125,9 +155,104 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Генерируем refresh token
+	refreshToken, err := h.authService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Error("Failed to generate refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+
+		return
+	}
+
+	// Сохраняем refresh token в БД
+	expiresAt := time.Now().Add(h.authService.RefreshTokenTTL())
+	if err := h.storage.SaveRefreshToken(user.ID, refreshToken, expiresAt); err != nil {
+		h.logger.Error("Failed to save refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+
+		return
+	}
+
 	h.respondSuccess(w, "Registration successful", LoginResponse{
-		Token:    token,
-		Username: user.Username,
-		UserID:   user.ID,
+		Token:        token,
+		RefreshToken: refreshToken,
+		Username:     user.Username,
+		UserID:       user.ID,
 	})
+}
+
+// HandleRefresh обновляет access token используя refresh token
+func (h *Handler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		h.respondError(w, http.StatusBadRequest, "Refresh token is required")
+		return
+	}
+
+	// Проверяем refresh token в БД
+	userID, err := h.storage.GetRefreshToken(req.RefreshToken)
+	if err != nil {
+		h.respondError(w, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+
+	// Получаем пользователя
+	user, err := h.storage.GetUserByID(userID)
+	if err != nil {
+		h.logger.Error("Failed to get user", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Удаляем старый refresh token
+	h.storage.DeleteRefreshToken(req.RefreshToken)
+
+	// Генерируем новый access token
+	token, err := h.authService.GenerateToken(user.ID, user.Username)
+	if err != nil {
+		h.logger.Error("Failed to generate token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Генерируем новый refresh token
+	refreshToken, err := h.authService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Error("Failed to generate refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Сохраняем новый refresh token
+	expiresAt := time.Now().Add(h.authService.RefreshTokenTTL())
+	if err := h.storage.SaveRefreshToken(user.ID, refreshToken, expiresAt); err != nil {
+		h.logger.Error("Failed to save refresh token", "error", err)
+		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	h.respondSuccess(w, "Token refreshed", RefreshResponse{
+		Token:        token,
+		RefreshToken: refreshToken,
+	})
+}
+
+// HandleLogout инвалидирует refresh token
+func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	var req RefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.RefreshToken != "" {
+		h.storage.DeleteRefreshToken(req.RefreshToken)
+	}
+
+	h.respondSuccess(w, "Logged out successfully", nil)
 }

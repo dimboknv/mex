@@ -39,13 +39,22 @@
         <!-- Accounts Page -->
         <div class="page active" id="page-accounts">
             <div class="page-header">
-                <h2>📋 Управление аккаунтами</h2>
+                <h2>Управление аккаунтами</h2>
                 <div>
-                    <button id="load-details-btn" class="btn-secondary">💰 Load Balances & Fees</button>
+                    <button id="load-details-btn" class="btn-secondary">Load Balances</button>
                     <button id="add-account-btn" class="btn-primary">+ Добавить аккаунт</button>
                 </div>
             </div>
             <div id="accounts-list"></div>
+
+            <!-- Live Feed -->
+            <div class="feed-section">
+                <div class="feed-header">
+                    <h3>Лента событий</h3>
+                    <span class="feed-filter-info" id="feed-filter-info">Все аккаунты</span>
+                </div>
+                <div id="trades-feed"></div>
+            </div>
         </div>
 
         <!-- Copy Trading Page (Unified) -->
@@ -169,6 +178,19 @@
                         <button type="button" class="btn-secondary" id="close-modal-btn">Отмена</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для истории аккаунта -->
+    <div class="modal hidden" id="account-history-modal">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2 id="account-history-title">История аккаунта</h2>
+                <button class="modal-close" id="close-history-modal-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="account-history-list"></div>
             </div>
         </div>
     </div>
