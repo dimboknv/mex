@@ -175,7 +175,7 @@ function switchPage(page) {
         loadAccounts();
         startBalancesAutoRefresh();
     }
-    if (page === 'copytrading') loadUnifiedStatus();
+    if (page === 'websocket') loadUnifiedStatus();
     if (page === 'trades') loadTrades();
     if (page === 'logs') loadLogs();
 }

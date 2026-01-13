@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	copytrading2 "tg_mexc/internal/mexc/copytrading"
+	copytrading "tg_mexc/internal/mexc/copytrading"
 )
 
 // mirrorToken - токен для идентификации пользователя
@@ -24,7 +24,7 @@ type mirrorToken struct {
 
 // mirrorService реализует MirrorService
 type mirrorService struct {
-	manager *copytrading2.Manager
+	manager *copytrading.Manager
 	storage AccountStorage
 	logger  *slog.Logger
 	apiURL  string
@@ -35,7 +35,7 @@ type mirrorService struct {
 
 // NewMirrorService создаёт новый Mirror сервис
 func NewMirrorService(
-	manager *copytrading2.Manager,
+	manager *copytrading.Manager,
 	storage AccountStorage,
 	apiURL string,
 	logger *slog.Logger,
@@ -178,7 +178,7 @@ func (s *mirrorService) stopAll() {
 }
 
 // processRequest обрабатывает mirror запрос
-func (s *mirrorService) processRequest(ctx context.Context, session *copytrading2.Session, path string, body []byte) error {
+func (s *mirrorService) processRequest(ctx context.Context, session *copytrading.Session, path string, body []byte) error {
 	switch {
 	case strings.HasSuffix(path, "/order/create"):
 		return s.handleOrderCreate(ctx, session, body)
@@ -197,7 +197,7 @@ func (s *mirrorService) processRequest(ctx context.Context, session *copytrading
 
 // === Request handlers ===
 
-func (s *mirrorService) handleOrderCreate(ctx context.Context, session *copytrading2.Session, body []byte) error {
+func (s *mirrorService) handleOrderCreate(ctx context.Context, session *copytrading.Session, body []byte) error {
 	openReq, closeReq, err := s.parseOrderCreate(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse order create: %w", err)
@@ -220,7 +220,7 @@ func (s *mirrorService) handleOrderCreate(ctx context.Context, session *copytrad
 	return nil
 }
 
-func (s *mirrorService) handlePlanOrderPlace(ctx context.Context, session *copytrading2.Session, body []byte) error {
+func (s *mirrorService) handlePlanOrderPlace(ctx context.Context, session *copytrading.Session, body []byte) error {
 	req, err := s.parsePlanOrderPlace(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse plan order: %w", err)
@@ -235,7 +235,7 @@ func (s *mirrorService) handlePlanOrderPlace(ctx context.Context, session *copyt
 	return nil
 }
 
-func (s *mirrorService) handleStopOrderCancel(ctx context.Context, session *copytrading2.Session, body []byte) error {
+func (s *mirrorService) handleStopOrderCancel(ctx context.Context, session *copytrading.Session, body []byte) error {
 	orderIDs, err := s.parseStopOrderCancel(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse stop order cancel: %w", err)
@@ -248,7 +248,7 @@ func (s *mirrorService) handleStopOrderCancel(ctx context.Context, session *copy
 	return nil
 }
 
-func (s *mirrorService) handleChangePlanPrice(ctx context.Context, session *copytrading2.Session, body []byte) error {
+func (s *mirrorService) handleChangePlanPrice(ctx context.Context, session *copytrading.Session, body []byte) error {
 	req, err := s.parseChangePlanPrice(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse change plan price: %w", err)
@@ -261,7 +261,7 @@ func (s *mirrorService) handleChangePlanPrice(ctx context.Context, session *copy
 	return nil
 }
 
-func (s *mirrorService) handleChangeLeverage(ctx context.Context, session *copytrading2.Session, body []byte) error {
+func (s *mirrorService) handleChangeLeverage(ctx context.Context, session *copytrading.Session, body []byte) error {
 	req, err := s.parseChangeLeverage(body)
 	if err != nil {
 		return fmt.Errorf("failed to parse change leverage: %w", err)
@@ -287,7 +287,7 @@ type orderCreateRequest struct {
 	PositionID    int64  `json:"positionId,omitempty"`
 }
 
-func (s *mirrorService) parseOrderCreate(body []byte) (*copytrading2.OpenPositionRequest, *copytrading2.ClosePositionRequest, error) {
+func (s *mirrorService) parseOrderCreate(body []byte) (*copytrading.OpenPositionRequest, *copytrading.ClosePositionRequest, error) {
 	var raw orderCreateRequest
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, nil, err
@@ -299,7 +299,7 @@ func (s *mirrorService) parseOrderCreate(body []byte) (*copytrading2.OpenPositio
 		if raw.StopLossPrice != "" {
 			fmt.Sscanf(raw.StopLossPrice, "%f", &stopLoss)
 		}
-		return &copytrading2.OpenPositionRequest{
+		return &copytrading.OpenPositionRequest{
 			Symbol:        raw.Symbol,
 			Side:          raw.Side,
 			Volume:        float64(raw.Vol),
@@ -307,7 +307,7 @@ func (s *mirrorService) parseOrderCreate(body []byte) (*copytrading2.OpenPositio
 			StopLossPrice: stopLoss,
 		}, nil, nil
 	case 2, 4:
-		return nil, &copytrading2.ClosePositionRequest{
+		return nil, &copytrading.ClosePositionRequest{
 			Symbol:     raw.Symbol,
 			Side:       raw.Side,
 			Volume:     float64(raw.Vol),
@@ -326,13 +326,13 @@ type planOrderPlaceRequest struct {
 	ProfitTrend     int     `json:"profitTrend"`
 }
 
-func (s *mirrorService) parsePlanOrderPlace(body []byte) (copytrading2.PlacePlanOrderRequest, error) {
+func (s *mirrorService) parsePlanOrderPlace(body []byte) (copytrading.PlacePlanOrderRequest, error) {
 	var raw planOrderPlaceRequest
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return copytrading2.PlacePlanOrderRequest{}, err
+		return copytrading.PlacePlanOrderRequest{}, err
 	}
 
-	return copytrading2.PlacePlanOrderRequest{
+	return copytrading.PlacePlanOrderRequest{
 		Symbol:          raw.Symbol,
 		StopLossPrice:   raw.StopLossPrice,
 		TakeProfitPrice: raw.TakeProfitPrice,
@@ -368,13 +368,13 @@ type changePlanPriceRequest struct {
 	TakeProfitReverse int     `json:"takeProfitReverse"`
 }
 
-func (s *mirrorService) parseChangePlanPrice(body []byte) (copytrading2.ChangePlanPriceRequest, error) {
+func (s *mirrorService) parseChangePlanPrice(body []byte) (copytrading.ChangePlanPriceRequest, error) {
 	var raw changePlanPriceRequest
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return copytrading2.ChangePlanPriceRequest{}, err
+		return copytrading.ChangePlanPriceRequest{}, err
 	}
 
-	return copytrading2.ChangePlanPriceRequest{
+	return copytrading.ChangePlanPriceRequest{
 		StopPlanOrderID:   raw.StopPlanOrderID,
 		StopLossPrice:     raw.StopLossPrice,
 		LossTrend:         raw.LossTrend,
@@ -391,13 +391,13 @@ type changeLeverageRequest struct {
 	PositionType int    `json:"positionType"`
 }
 
-func (s *mirrorService) parseChangeLeverage(body []byte) (copytrading2.ChangeLeverageRequest, error) {
+func (s *mirrorService) parseChangeLeverage(body []byte) (copytrading.ChangeLeverageRequest, error) {
 	var raw changeLeverageRequest
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return copytrading2.ChangeLeverageRequest{}, err
+		return copytrading.ChangeLeverageRequest{}, err
 	}
 
-	return copytrading2.ChangeLeverageRequest{
+	return copytrading.ChangeLeverageRequest{
 		Symbol:       raw.Symbol,
 		Leverage:     raw.Leverage,
 		OpenType:     raw.OpenType,
@@ -405,7 +405,7 @@ func (s *mirrorService) parseChangeLeverage(body []byte) (copytrading2.ChangeLev
 	}, nil
 }
 
-func (s *mirrorService) logResult(operation string, result copytrading2.ExecutionResult) {
+func (s *mirrorService) logResult(operation string, result copytrading.ExecutionResult) {
 	for _, r := range result.Results {
 		if r.Success {
 			s.logger.Info("Mirror "+operation+" success",

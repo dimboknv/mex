@@ -47,10 +47,13 @@ func (s *WebStorage) init() error {
 -- Пользователи веб-приложения
 CREATE TABLE if NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
+    username TEXT UNIQUE,
+    password_hash TEXT,
+    telegram_chat_id INTEGER UNIQUE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX if NOT EXISTS idx_users_telegram ON users(telegram_chat_id);
 
 -- Аккаунты MEXC
 CREATE TABLE if NOT EXISTS accounts (
@@ -155,6 +158,12 @@ CREATE INDEX if NOT EXISTS idx_sessions_active ON copy_trading_sessions(is_activ
 
 	// Миграция: добавляем колонку action в trades если её нет
 	_, _ = s.db.Exec(`ALTER TABLE trades ADD COLUMN action text NOT NULL DEFAULT ''`)
+
+	// Миграция: добавляем колонку telegram_chat_id в users если её нет
+	_, _ = s.db.Exec(`ALTER TABLE users ADD COLUMN telegram_chat_id INTEGER UNIQUE`)
+
+	// Миграция: делаем username и password_hash nullable для telegram-only пользователей
+	// SQLite не поддерживает ALTER COLUMN, поэтому просто игнорируем если не сработает
 
 	s.logger.Info("✅ Web database initialized")
 
@@ -605,6 +614,133 @@ func (s *WebStorage) HasActiveCopyTradingSession(userID int) (bool, error) {
 	}
 
 	return count > 0, nil
+}
+
+// === Telegram Integration ===
+
+// GetOrCreateUserByTelegramChatID получает или создает пользователя по Telegram chat_id
+func (s *WebStorage) GetOrCreateUserByTelegramChatID(chatID int64) (int, error) {
+	// Пытаемся найти существующего пользователя
+	var userID int
+	err := s.db.QueryRow(`
+		SELECT id FROM users WHERE telegram_chat_id = ?
+	`, chatID).Scan(&userID)
+
+	if err == nil {
+		return userID, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to query user: %w", err)
+	}
+
+	// Создаем нового пользователя для Telegram
+	username := fmt.Sprintf("telegram_%d", chatID)
+	result, err := s.db.Exec(`
+		INSERT INTO users (username, telegram_chat_id)
+		VALUES (?, ?)
+	`, username, chatID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create telegram user: %w", err)
+	}
+
+	id, _ := result.LastInsertId()
+	s.logger.Info("✅ Telegram user created",
+		slog.Int64("chat_id", chatID),
+		slog.Int("user_id", int(id)))
+
+	return int(id), nil
+}
+
+// GetAccountByName получает аккаунт по имени
+func (s *WebStorage) GetAccountByName(userID int, name string) (*models2.Account, error) {
+	var acc models2.Account
+	var cookiesJSON string
+	var isMasterInt, disabledInt int
+
+	err := s.db.QueryRow(`
+		SELECT id, name, token, user_id_mexc, device_id,
+		       coalesce(cookies, '{}'), coalesce(user_agent, ''), coalesce(proxy, ''),
+		       coalesce(is_master, 0), coalesce(disabled, 0)
+		FROM accounts
+		WHERE user_id = ? AND name = ?
+		LIMIT 1
+	`, userID, name).Scan(&acc.ID, &acc.Name, &acc.Token, &acc.UserID,
+		&acc.DeviceID, &cookiesJSON, &acc.UserAgent, &acc.Proxy, &isMasterInt, &disabledInt)
+	if err != nil {
+		return nil, err
+	}
+
+	json.Unmarshal([]byte(cookiesJSON), &acc.Cookies)
+	acc.IsMaster = isMasterInt == 1
+	acc.Disabled = disabledInt == 1
+
+	return &acc, nil
+}
+
+// DeleteAccountByName удаляет аккаунт по имени
+func (s *WebStorage) DeleteAccountByName(userID int, name string) error {
+	result, err := s.db.Exec("DELETE FROM accounts WHERE user_id = ? AND name = ?", userID, name)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("аккаунт %s не найден", name)
+	}
+
+	s.logger.Info("✅ Account deleted",
+		slog.String("name", name),
+		slog.Int("user_id", userID))
+
+	return nil
+}
+
+// SetMasterAccountByName устанавливает аккаунт как главный по имени
+func (s *WebStorage) SetMasterAccountByName(userID int, name string) error {
+	// Убираем флаг master у всех аккаунтов
+	_, err := s.db.Exec("UPDATE accounts SET is_master = 0 WHERE user_id = ?", userID)
+	if err != nil {
+		return err
+	}
+
+	// Устанавливаем флаг для нужного аккаунта
+	result, err := s.db.Exec("UPDATE accounts SET is_master = 1 WHERE user_id = ? AND name = ?", userID, name)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("аккаунт %s не найден", name)
+	}
+
+	s.logger.Info("✅ Master account set",
+		slog.String("name", name),
+		slog.Int("user_id", userID))
+
+	return nil
+}
+
+// UpdateDisabledStatusByName обновляет disabled статус аккаунта по имени
+func (s *WebStorage) UpdateDisabledStatusByName(userID int, name string, disabled bool) error {
+	disabledInt := 0
+	if disabled {
+		disabledInt = 1
+	}
+
+	result, err := s.db.Exec("UPDATE accounts SET disabled = ? WHERE user_id = ? AND name = ?", disabledInt, userID, name)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("аккаунт %s не найден", name)
+	}
+
+	return nil
 }
 
 // Close закрывает соединение с БД

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	copytrading2 "tg_mexc/internal/mexc/copytrading"
+	copytrading "tg_mexc/internal/mexc/copytrading"
 	"tg_mexc/internal/mexc/websocket"
 )
 
@@ -14,11 +14,11 @@ import (
 type Service struct {
 	wsClient *websocket.Client
 	logger   *slog.Logger
-	session  *copytrading2.Session
+	session  *copytrading.Session
 }
 
 // NewService создает новый сервис copy trading для Web App
-func NewService(session *copytrading2.Session, logger *slog.Logger) *Service {
+func NewService(session *copytrading.Session, logger *slog.Logger) *Service {
 	return &Service{
 		logger:  logger,
 		session: session,
@@ -99,7 +99,7 @@ func (s *Service) handleOrderEvent(ctx context.Context, order websocket.OrderEve
 	}
 
 	var err error
-	if copytrading2.IsOpenOrder(order.Side) {
+	if copytrading.IsOpenOrder(order.Side) {
 		_, err = s.session.OpenPosition(ctx, *openReq)
 	} else {
 		_, err = s.session.ClosePosition(ctx, *closeReq)
@@ -151,14 +151,14 @@ func (s *Service) handleOrderDealEvent(ctx context.Context, deal websocket.DealE
 
 // fromWebSocketOrder конвертирует websocket.OrderEvent в запрос
 // Возвращает либо OpenPositionRequest, либо ClosePositionRequest
-func fromWebSocketOrder(event websocket.OrderEvent) (openReq *copytrading2.OpenPositionRequest, closeReq *copytrading2.ClosePositionRequest) {
+func fromWebSocketOrder(event websocket.OrderEvent) (openReq *copytrading.OpenPositionRequest, closeReq *copytrading.ClosePositionRequest) {
 	switch event.Side {
 	case 1, 3: // open long, open short
 		var stopLoss float64
 		if event.StopOrderEvent != nil && event.StopOrderEvent.StopLossPrice > 0 {
 			stopLoss = event.StopOrderEvent.StopLossPrice
 		}
-		return &copytrading2.OpenPositionRequest{
+		return &copytrading.OpenPositionRequest{
 			Symbol:        event.Symbol,
 			Side:          event.Side,
 			Volume:        event.Vol,
@@ -166,7 +166,7 @@ func fromWebSocketOrder(event websocket.OrderEvent) (openReq *copytrading2.OpenP
 			StopLossPrice: stopLoss,
 		}, nil
 	case 2, 4: // close short, close long
-		return nil, &copytrading2.ClosePositionRequest{
+		return nil, &copytrading.ClosePositionRequest{
 			Symbol: event.Symbol,
 			Side:   event.Side,
 			Volume: event.Vol,
@@ -176,8 +176,8 @@ func fromWebSocketOrder(event websocket.OrderEvent) (openReq *copytrading2.OpenP
 }
 
 // fromWebSocketStopOrder конвертирует websocket.StopOrderEvent в PlacePlanOrderRequest
-func fromWebSocketStopOrder(event websocket.StopOrderEvent) copytrading2.PlacePlanOrderRequest {
-	return copytrading2.PlacePlanOrderRequest{
+func fromWebSocketStopOrder(event websocket.StopOrderEvent) copytrading.PlacePlanOrderRequest {
+	return copytrading.PlacePlanOrderRequest{
 		Symbol:          event.Symbol,
 		StopLossPrice:   event.StopLossPrice,
 		TakeProfitPrice: event.TakeProfitPrice,
@@ -187,8 +187,8 @@ func fromWebSocketStopOrder(event websocket.StopOrderEvent) copytrading2.PlacePl
 }
 
 // fromWebSocketStopPlanOrder конвертирует websocket.StopPlanOrderEvent в ChangePlanPriceRequest
-func fromWebSocketStopPlanOrder(event websocket.StopPlanOrderEvent) copytrading2.ChangePlanPriceRequest {
-	return copytrading2.ChangePlanPriceRequest{
+func fromWebSocketStopPlanOrder(event websocket.StopPlanOrderEvent) copytrading.ChangePlanPriceRequest {
+	return copytrading.ChangePlanPriceRequest{
 		StopLossPrice:     event.StopLossPrice,
 		LossTrend:         event.LossTrend,
 		ProfitTrend:       event.ProfitTrend,
@@ -199,9 +199,9 @@ func fromWebSocketStopPlanOrder(event websocket.StopPlanOrderEvent) copytrading2
 
 // fromWebSocketPosition конвертирует websocket.PositionEvent в ClosePositionRequest
 // Возвращает nil если позиция не закрыта (state != 3)
-func fromWebSocketPosition(event websocket.PositionEvent) *copytrading2.ClosePositionRequest {
+func fromWebSocketPosition(event websocket.PositionEvent) *copytrading.ClosePositionRequest {
 	if event.State != 3 { // только закрытие позиций
 		return nil
 	}
-	return &copytrading2.ClosePositionRequest{Symbol: event.Symbol}
+	return &copytrading.ClosePositionRequest{Symbol: event.Symbol}
 }

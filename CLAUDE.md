@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MEXC Copy Trading monorepo with two independent Go applications for automated futures trading on the MEXC exchange:
 - **Telegram Bot** (`cmd/tg-bot/`) - Copy trading controlled via Telegram commands
-- **Web App** (`cmd/web-app/`) - REST API with JWT auth and web frontend
+- **Web App** (`cmd/web-app/`) - REST API with JWT auth and embedded web frontend
 
-Both apps share the same core services in `pkg/` for MEXC API interaction, WebSocket connections, and copy trading logic.
+Both apps share the same SQLite database (`DB_PATH`) and core services in `internal/` for MEXC API interaction, WebSocket connections, and copy trading logic.
 
 ## Build Commands
 
@@ -26,7 +26,7 @@ cd cmd/web-app && go build -o web_app
 # Download dependencies
 go mod download
 
-# Fix module issues (shown as diagnostics)
+# Fix module issues
 go mod tidy
 ```
 
@@ -34,7 +34,9 @@ go mod tidy
 
 **Telegram Bot:**
 - `TELEGRAM_BOT_TOKEN` - Required
+- `DB_PATH` - SQLite database path (default: same as web app for shared data)
 - `DRY_RUN` - `true` (default) for simulation, `false` for real trades
+- `WEBHOOK_URL` / `WEBHOOK_PATH` - Optional, for webhook mode (production)
 
 **Web App:**
 - `ADDRESS` - Listen address (default: `:8080`)
@@ -47,38 +49,57 @@ go mod tidy
 
 ### Package Structure
 
-- `cmd/` - Application entry points with multi-handler logging (stdout + file)
-- `pkg/` - Shared packages used by both applications:
-  - `pkg/services/copytrading/` - Core copy trading logic with WebSocket event handlers
-  - `pkg/services/mexc/` - MEXC REST API client (orders, positions, leverage, stop-loss)
-  - `pkg/services/websocket/` - WebSocket client for real-time order events from master account
-  - `pkg/storage/` - SQLite storage for accounts (Telegram bot uses `Storage`, Web uses `WebStorage`)
-  - `pkg/models/` - Shared data models
-- `internal/` - Web-app specific code:
-  - `internal/api/` - REST API handlers with gorilla/mux router
-  - `internal/auth/` - JWT authentication service
-  - `internal/middleware/` - CORS and auth middleware
-  - `internal/handlers/` - Telegram bot command handlers
-- `web/` - Static frontend files for Web App
-- `migrations/` - SQL schema migrations
+```
+cmd/
+├── tg-bot/main.go      # Telegram bot entry point
+└── web-app/main.go     # Web app entry point
+
+internal/
+├── api/                # Web app REST API
+│   ├── auth/           # JWT authentication service
+│   ├── copytrading/    # Copy trading service layer & interfaces
+│   ├── middleware/     # CORS and auth middleware
+│   ├── web/            # Embedded static frontend (go:embed)
+│   ├── handler.go      # Main API handler struct
+│   └── router.go       # Route configuration
+├── config/             # Environment variable loading
+├── mexc/               # MEXC exchange integration
+│   ├── client.go       # REST API client (orders, positions, leverage)
+│   ├── copytrading/    # Copy trading engine & session management
+│   │   ├── engine.go   # Trade execution engine
+│   │   ├── service.go  # Manager & Session types
+│   │   └── websocket/  # WebSocket-based copy trading
+│   └── websocket/      # WebSocket client for MEXC events
+├── models/             # Shared data models
+├── storage/            # Unified SQLite storage (WebStorage used by both apps)
+└── telegram/           # Telegram bot service & command handlers
+    └── copytrading/    # Telegram-specific copy trading adapter
+```
 
 ### Copy Trading Flow
 
-1. Master account connects via WebSocket (`pkg/services/websocket/`)
-2. WebSocket client receives order/position events from MEXC
-3. Copy trading service (`pkg/services/copytrading/service.go`) processes events
-4. For each event, parallel goroutines execute corresponding actions on slave accounts via MEXC REST API
+1. Master account connects via WebSocket (`internal/mexc/websocket/`)
+2. WebSocket receives order events from MEXC (`wss://contract.mexc.com/edge`)
+3. Copy trading engine (`internal/mexc/copytrading/engine.go`) processes events
+4. Parallel goroutines execute actions on slave accounts via MEXC REST API
 5. Events: `OrderEvent`, `StopOrderEvent`, `StopPlanOrderEvent`, `PositionEvent`, `DealEvent`
+
+### Copy Trading Modes (Web App)
+
+1. **WebSocket Mode** - Direct WebSocket connection from master account for real-time event handling
+2. **Mirror Mode** - JavaScript intercepts MEXC API calls in browser, forwards to backend via token auth
 
 ### Storage
 
-Two separate storage implementations using `modernc.org/sqlite`:
-- `pkg/storage/storage.go` - For Telegram bot (accounts keyed by `chat_id`)
-- `pkg/storage/web-storage.go` - For Web app (accounts keyed by `user_id`, includes users table)
+Unified storage using `modernc.org/sqlite` in `internal/storage/web-storage.go`:
+- Both apps use `WebStorage` for shared database access
+- Users table with `telegram_chat_id` column for Telegram-to-user mapping
+- Accounts keyed by `user_id` (FK to users table)
+- Includes: trades history, trade_details, activity_log, copy_trading_sessions
 
-### Authentication
+### MEXC Account Authentication
 
-The Web app uses browser cookies extracted from MEXC via a JavaScript script. Accounts store:
+Accounts use browser cookies extracted via JavaScript script:
 - `uc_token` - Authentication token
 - `u_id` - User ID
 - `deviceId` - Device fingerprint
@@ -86,7 +107,10 @@ The Web app uses browser cookies extracted from MEXC via a JavaScript script. Ac
 
 ## Key Patterns
 
-- DRY_RUN mode: All trading actions are logged but not executed when enabled
-- Multi-handler slog: Both apps log to stdout (pretty/colored) and file simultaneously
-- Concurrent slave processing: Copy trading uses goroutines with `sync.WaitGroup` for parallel execution
-- Graceful shutdown: Web app handles SIGINT/SIGTERM for clean shutdown
+- **Unified database**: Both Telegram bot and Web app share the same SQLite database
+- **DRY_RUN mode**: Default enabled - all trading actions logged but not executed
+- **Multi-handler slog**: Both apps log to stdout (colored via tint) and file simultaneously
+- **Concurrent slave processing**: Uses `sync.WaitGroup` for parallel trade execution across accounts
+- **Graceful shutdown**: Signal handlers for SIGINT/SIGTERM with clean resource cleanup
+- **Interface-based storage**: `AccountStorage`, `TradeStorage`, `LogStorage`, `UserStorage` interfaces
+- **Telegram user mapping**: Auto-creates user record when Telegram user first interacts (chatID → userID)

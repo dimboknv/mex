@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"tg_mexc/internal/config"
+	"tg_mexc/internal/mexc/copytrading"
 	"tg_mexc/internal/storage"
 	"tg_mexc/internal/telegram"
+	telegramcopytrading "tg_mexc/internal/telegram/copytrading"
 	"tg_mexc/internal/telegram/handlers"
 
 	"github.com/lmittmann/tint"
@@ -49,13 +51,13 @@ func main() {
 	// Загрузка конфигурации
 	cfg := config.Load(logger)
 
-	// Инициализация хранилища
-	store, err := storage.New(cfg.DBPath, logger)
+	// Инициализация хранилища (используем WebStorage для единой базы с web-app)
+	webStorage, err := storage.NewWeb(cfg.DBPath, logger)
 	if err != nil {
 		logger.Error("Failed to initialize storage", slog.Any("error", err))
 		os.Exit(1)
 	}
-	defer store.Close()
+	defer webStorage.Close()
 
 	// Инициализация Telegram сервиса
 	tgService, err := telegram.New(cfg.TelegramToken, logger)
@@ -64,11 +66,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Инициализация Copy Trading сервиса
-	// copyTradingService := copytrading.New(store, logger, cfg.DryRun)
+	// Инициализация Copy Trading
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, cfg.DryRun)
+	manager := copytrading.NewManager(engine, cfg.DryRun, logger)
+	copyTradingSvc := telegramcopytrading.New(manager, webStorage, logger)
 
 	// Создание обработчика
-	handler := handlers.New(store, tgService, nil, logger)
+	handler := handlers.New(webStorage, tgService, copyTradingSvc, logger)
 
 	// Запуск бота
 	logger.Info("🚀 Starting bot...")
@@ -125,6 +129,9 @@ func main() {
 
 		logger.Info("🛑 Shutting down bot...")
 
+		// Останавливаем copy trading
+		copyTradingSvc.StopAll()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -146,6 +153,7 @@ func main() {
 		go func() {
 			<-quit
 			logger.Info("🛑 Shutting down bot...")
+			copyTradingSvc.StopAll()
 			tgService.GetBot().StopReceivingUpdates()
 		}()
 

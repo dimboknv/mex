@@ -15,39 +15,32 @@ import (
 	"tg_mexc/internal/models"
 	"tg_mexc/internal/storage"
 	"tg_mexc/internal/telegram"
+	telegramcopytrading "tg_mexc/internal/telegram/copytrading"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // Handler обрабатывает команды бота
 type Handler struct {
-	storage     *storage.Storage
+	storage     *storage.WebStorage
 	telegram    *telegram.Service
-	copyTrading interface {
-		Start(chatID int64, ignoreFees bool) (string, error)
-		Stop(chatID int64) (string, error)
-		IsActive(chatID int64) bool
-		GetStatus(chatID int64) string
-		GetEventChannel(chatID int64) <-chan string
-	}
-	logger *slog.Logger
+	copyTrading *telegramcopytrading.Service
+	logger      *slog.Logger
 }
 
 // New создает новый обработчик
-func New(storage *storage.Storage, telegram *telegram.Service, copyTrading interface {
-	Start(chatID int64, ignoreFees bool) (string, error)
-	Stop(chatID int64) (string, error)
-	IsActive(chatID int64) bool
-	GetStatus(chatID int64) string
-	GetEventChannel(chatID int64) <-chan string
-}, logger *slog.Logger,
-) *Handler {
+func New(storage *storage.WebStorage, telegram *telegram.Service, copyTrading *telegramcopytrading.Service, logger *slog.Logger) *Handler {
 	return &Handler{
 		storage:     storage,
 		telegram:    telegram,
 		copyTrading: copyTrading,
 		logger:      logger,
 	}
+}
+
+// getUserID получает userID для chatID (создает пользователя если нужно)
+func (h *Handler) getUserID(chatID int64) (int, error) {
+	return h.storage.GetOrCreateUserByTelegramChatID(chatID)
 }
 
 // HandleUpdate обрабатывает обновление от Telegram
@@ -120,6 +113,14 @@ func (h *Handler) HandleUpdate(update tgbotapi.Update) {
 		response = h.handleStopCopy(chatID)
 	case "copy_status":
 		response = h.handleCopyStatus(chatID)
+	case "enable":
+		response = h.handleEnable(chatID, args)
+	case "disable":
+		response = h.handleDisable(chatID, args)
+	case "history":
+		response = h.handleHistory(chatID, args)
+	case "logs":
+		response = h.handleLogs(chatID, args)
 	case "help":
 		response = h.handleHelp()
 	default:
@@ -139,6 +140,8 @@ func (h *Handler) handleStart() string {
 /list - Список аккаунтов
 /balance - Баланс
 /fee_rates - Проверить комиссии
+/enable <name> - Включить аккаунт
+/disable <name> - Отключить аккаунт
 
 🔄 Copy Trading:
 /set_master <name> - Установить главный аккаунт
@@ -156,6 +159,8 @@ func (h *Handler) handleStart() string {
 
 📈 Информация:
 /positions - Позиции
+/history [limit] - История сделок
+/logs [limit] - Логи активности
 /help - Помощь`
 }
 
@@ -201,8 +206,13 @@ func (h *Handler) handleDelete(chatID int64, args []string) string {
 		return "❌ Формат: /delete <name>"
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
 	name := args[0]
-	err := h.storage.DeleteAccount(chatID, name)
+	err = h.storage.DeleteAccountByName(userID, name)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -211,7 +221,12 @@ func (h *Handler) handleDelete(chatID int64, args []string) string {
 }
 
 func (h *Handler) handleList(chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -236,15 +251,25 @@ func (h *Handler) handleList(chatID int64) string {
 			disabledIcon = " 🛑"
 		}
 
-		lines = append(lines, fmt.Sprintf("%s %s%s\nToken: %s...\nDevice: %s...%s\n",
-			position, acc.Name, disabledIcon, acc.Token[:10], acc.DeviceID[:8], proxyInfo))
+		masterIcon := ""
+		if acc.IsMaster {
+			masterIcon = " 👑"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s %s%s%s\nToken: %s...\nDevice: %s...%s\n",
+			position, acc.Name, masterIcon, disabledIcon, acc.Token[:10], acc.DeviceID[:8], proxyInfo))
 	}
 
 	return strings.Join(lines, "\n")
 }
 
 func (h *Handler) handleBalance(ctx context.Context, chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -285,6 +310,11 @@ func (h *Handler) handleOpen(ctx context.Context, chatID int64, args []string) s
 		return "❌ Формат: /open <name> <symbol> <long|short> <vol> <leverage>"
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
 	accountName := args[0]
 	symbol := strings.ToUpper(args[1])
 	sideStr := strings.ToLower(args[2])
@@ -296,29 +326,11 @@ func (h *Handler) handleOpen(ctx context.Context, chatID int64, args []string) s
 		side = 3 // 3=open short
 	}
 
-	// Получаем все аккаунты пользователя
-	accounts, err := h.storage.GetAccounts(chatID)
+	// Получаем аккаунт по имени
+	targetAccount, err := h.storage.GetAccountByName(userID, accountName)
 	if err != nil {
-		return fmt.Sprintf("❌ Ошибка: %v", err)
-	}
-
-	// Ищем нужный аккаунт
-	var targetAccount *models.Account
-	for _, acc := range accounts {
-		if acc.Name == accountName {
-			targetAccount = &acc
-			break
-		}
-	}
-
-	if targetAccount == nil {
 		return fmt.Sprintf("❌ Аккаунт '%s' не найден. Используй /list", accountName)
 	}
-
-	// Проверяем disabled статус
-	// if targetAccount.Disabled {
-	// 	return fmt.Sprintf("🛑 Аккаунт '%s' отключен из-за наличия комиссии. Торговля невозможна.", accountName)
-	// }
 
 	// Создаём клиент и открываем позицию
 	client, err := mexc.NewClient(*targetAccount, h.logger)
@@ -339,7 +351,7 @@ func (h *Handler) handleOpen(ctx context.Context, chatID int64, args []string) s
 		slog.String("account", targetAccount.Name))
 
 	// Проверяем и обновляем disabled статус после открытия позиции
-	h.checkAndUpdateDisabledStatus(ctx, chatID, accountName)
+	h.checkAndUpdateDisabledStatus(ctx, userID, accountName)
 
 	sideStr = "LONG"
 	if side == 3 {
@@ -359,25 +371,17 @@ func (h *Handler) handleClose(ctx context.Context, chatID int64, args []string) 
 		return "❌ Формат: /close <name> <symbol>"
 	}
 
-	accountName := args[0]
-	symbol := strings.ToUpper(args[1])
-
-	// Получаем все аккаунты пользователя
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
 
-	// Ищем нужный аккаунт
-	var targetAccount *models.Account
-	for _, acc := range accounts {
-		if acc.Name == accountName {
-			targetAccount = &acc
-			break
-		}
-	}
+	accountName := args[0]
+	symbol := strings.ToUpper(args[1])
 
-	if targetAccount == nil {
+	// Получаем аккаунт по имени
+	targetAccount, err := h.storage.GetAccountByName(userID, accountName)
+	if err != nil {
 		return fmt.Sprintf("❌ Аккаунт '%s' не найден. Используй /list", accountName)
 	}
 
@@ -408,6 +412,11 @@ func (h *Handler) handleOpenAll(ctx context.Context, chatID int64, args []string
 		return "❌ Формат: /open_all <symbol> <long|short> <vol> <leverage>"
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
 	symbol := strings.ToUpper(args[0])
 	sideStr := strings.ToLower(args[1])
 	vol, _ := strconv.Atoi(args[2])
@@ -418,7 +427,7 @@ func (h *Handler) handleOpenAll(ctx context.Context, chatID int64, args []string
 		side = 3 // 3=open short
 	}
 
-	accounts, err := h.storage.GetAccounts(chatID)
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -434,16 +443,6 @@ func (h *Handler) handleOpenAll(ctx context.Context, chatID int64, args []string
 	skippedCount := 0
 
 	for _, acc := range accounts {
-		// Пропускаем disabled аккаунты
-		// if acc.Disabled {
-		// 	h.logger.Info("Skipping disabled account",
-		// 		slog.String("account", acc.Name))
-		//
-		// 	skippedCount++
-		//
-		// 	continue
-		// }
-
 		client, err := mexc.NewClient(acc, h.logger)
 		if err != nil {
 			h.logger.Error("Account error",
@@ -469,7 +468,7 @@ func (h *Handler) handleOpenAll(ctx context.Context, chatID int64, args []string
 			successCount++
 
 			// Проверяем и обновляем disabled статус после открытия позиции
-			h.checkAndUpdateDisabledStatus(ctx, chatID, acc.Name)
+			h.checkAndUpdateDisabledStatus(ctx, userID, acc.Name)
 		}
 
 		time.Sleep(100 * time.Millisecond)
@@ -502,9 +501,14 @@ func (h *Handler) handleCloseAll(ctx context.Context, chatID int64, args []strin
 		return "❌ Формат: /close_all <symbol>"
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
 	symbol := strings.ToUpper(args[0])
 
-	accounts, err := h.storage.GetAccounts(chatID)
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -546,7 +550,12 @@ Symbol: %s
 }
 
 func (h *Handler) handlePositions(ctx context.Context, chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -645,6 +654,12 @@ func (h *Handler) handleBrowserFileUpload(ctx context.Context, chatID int64, msg
 		return
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		h.telegram.SendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+
 	name := parts[1]
 	proxyStr := ""
 	if len(parts) > 2 {
@@ -673,7 +688,7 @@ func (h *Handler) handleBrowserFileUpload(ctx context.Context, chatID int64, msg
 		return
 	}
 
-	err = h.storage.AddAccount(chatID, name, data, proxyStr)
+	err = h.storage.AddAccount(userID, name, data, proxyStr)
 	if err != nil {
 		h.telegram.SendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
 		return
@@ -685,7 +700,7 @@ func (h *Handler) handleBrowserFileUpload(ctx context.Context, chatID int64, msg
 	}
 
 	// Проверяем fee rate и обновляем disabled статус
-	hasCommission := h.checkAndUpdateDisabledStatus(ctx, chatID, name)
+	hasCommission := h.checkAndUpdateDisabledStatus(ctx, userID, name)
 
 	disabledWarning := ""
 	if hasCommission {
@@ -762,8 +777,13 @@ func (h *Handler) handleSetMaster(chatID int64, args []string) string {
 		return "❌ Формат: /set_master <name>"
 	}
 
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
 	name := args[0]
-	err := h.storage.SetMasterAccount(chatID, name)
+	err = h.storage.SetMasterAccountByName(userID, name)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -810,7 +830,12 @@ func (h *Handler) handleCopyStatus(chatID int64) string {
 }
 
 func (h *Handler) handleOpenOrders(ctx context.Context, chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -877,7 +902,12 @@ func (h *Handler) handleOpenOrders(ctx context.Context, chatID int64) string {
 }
 
 func (h *Handler) handleOpenStopOrders(ctx context.Context, chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -928,21 +958,9 @@ func (h *Handler) handleOpenStopOrders(ctx context.Context, chatID int64) string
 }
 
 // checkAndUpdateDisabledStatus проверяет fee rate и обновляет disabled статус
-func (h *Handler) checkAndUpdateDisabledStatus(ctx context.Context, chatID int64, accountName string) bool {
-	accounts, err := h.storage.GetAccounts(chatID)
+func (h *Handler) checkAndUpdateDisabledStatus(ctx context.Context, userID int, accountName string) bool {
+	targetAccount, err := h.storage.GetAccountByName(userID, accountName)
 	if err != nil {
-		return false
-	}
-
-	var targetAccount *models.Account
-	for _, acc := range accounts {
-		if acc.Name == accountName {
-			targetAccount = &acc
-			break
-		}
-	}
-
-	if targetAccount == nil {
 		return false
 	}
 
@@ -960,13 +978,18 @@ func (h *Handler) checkAndUpdateDisabledStatus(ctx context.Context, chatID int64
 	hasCommission := feeRate.OriginalMakerFee != 0 || feeRate.OriginalTakerFee != 0
 
 	// Обновляем статус в БД
-	h.storage.UpdateDisabledStatus(chatID, accountName, hasCommission)
+	h.storage.UpdateDisabledStatusByName(userID, accountName, hasCommission)
 
 	return hasCommission
 }
 
 func (h *Handler) handleFeeRates(ctx context.Context, chatID int64) string {
-	accounts, err := h.storage.GetAccounts(chatID)
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	accounts, err := h.storage.GetAccounts(userID)
 	if err != nil {
 		return fmt.Sprintf("❌ Ошибка: %v", err)
 	}
@@ -1001,4 +1024,139 @@ func (h *Handler) handleFeeRates(ctx context.Context, chatID int64) string {
 	}
 
 	return strings.Join(lines, "")
+}
+
+// handleEnable включает аккаунт
+func (h *Handler) handleEnable(chatID int64, args []string) string {
+	if len(args) < 1 {
+		return "❌ Формат: /enable <name>"
+	}
+
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	name := args[0]
+	err = h.storage.UpdateDisabledStatusByName(userID, name, false)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	return fmt.Sprintf("✅ Аккаунт %s включен", name)
+}
+
+// handleDisable отключает аккаунт
+func (h *Handler) handleDisable(chatID int64, args []string) string {
+	if len(args) < 1 {
+		return "❌ Формат: /disable <name>"
+	}
+
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	name := args[0]
+	err = h.storage.UpdateDisabledStatusByName(userID, name, true)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	return fmt.Sprintf("🛑 Аккаунт %s отключен", name)
+}
+
+// handleHistory показывает историю сделок
+func (h *Handler) handleHistory(chatID int64, args []string) string {
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	limit := 10
+	if len(args) > 0 {
+		if l, err := strconv.Atoi(args[0]); err == nil && l > 0 {
+			limit = l
+			if limit > 50 {
+				limit = 50
+			}
+		}
+	}
+
+	trades, err := h.storage.GetTrades(userID, limit, 0)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	if len(trades) == 0 {
+		return "📊 История сделок пуста"
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("📊 ИСТОРИЯ СДЕЛОК (последние %d):\n", len(trades)))
+
+	for _, trade := range trades {
+		sideText := "LONG"
+		if trade.Side == 3 || trade.Side == 4 {
+			sideText = "SHORT"
+		}
+
+		statusIcon := "✅"
+		if trade.Status == "error" || trade.Status == "failed" {
+			statusIcon = "❌"
+		} else if trade.Status == "pending" {
+			statusIcon = "⏳"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s %s %s x%d vol:%d\n   %s | %s",
+			statusIcon, trade.Symbol, sideText, trade.Leverage, trade.Volume,
+			trade.Action, trade.SentAt.Format("02.01 15:04")))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// handleLogs показывает логи активности
+func (h *Handler) handleLogs(chatID int64, args []string) string {
+	userID, err := h.getUserID(chatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	limit := 20
+	if len(args) > 0 {
+		if l, err := strconv.Atoi(args[0]); err == nil && l > 0 {
+			limit = l
+			if limit > 100 {
+				limit = 100
+			}
+		}
+	}
+
+	logs, err := h.storage.GetLogs(userID, limit, 0)
+	if err != nil {
+		return fmt.Sprintf("❌ Ошибка: %v", err)
+	}
+
+	if len(logs) == 0 {
+		return "📋 Логи пусты"
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("📋 ЛОГИ АКТИВНОСТИ (последние %d):\n", len(logs)))
+
+	for _, log := range logs {
+		levelIcon := "ℹ️"
+		switch log.Level {
+		case "warning":
+			levelIcon = "⚠️"
+		case "error":
+			levelIcon = "❌"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s [%s] %s\n   %s",
+			levelIcon, log.Action, log.Message, log.CreatedAt.Format("02.01 15:04")))
+	}
+
+	return strings.Join(lines, "\n")
 }

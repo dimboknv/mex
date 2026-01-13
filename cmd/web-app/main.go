@@ -14,7 +14,7 @@ import (
 	"tg_mexc/internal/api"
 	"tg_mexc/internal/api/auth"
 	apicopytrading "tg_mexc/internal/api/copytrading"
-	copytrading2 "tg_mexc/internal/mexc/copytrading"
+	copytrading "tg_mexc/internal/mexc/copytrading"
 	"tg_mexc/internal/storage"
 
 	"github.com/lmittmann/tint"
@@ -94,8 +94,8 @@ func main() {
 	authService := auth.NewService(jwtSecret, 24*time.Hour) // Токен действителен 24 часа
 
 	// Инициализация copy trading сервисов
-	engine := copytrading2.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
-	manager := copytrading2.NewManager(engine, dryRun, logger)
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
+	manager := copytrading.NewManager(engine, dryRun, logger)
 
 	// Создаём главный сервис copy trading
 	copyTradingSvc := apicopytrading.NewService(manager, webStorage, apiURL, logger)
