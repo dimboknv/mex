@@ -7,28 +7,46 @@ import (
 
 	"tg_mexc/internal/auth"
 	"tg_mexc/pkg/services/copytrading"
+	wscopytrading "tg_mexc/pkg/services/copytrading/websocekt"
 	"tg_mexc/pkg/storage"
 )
 
-// Handler обрабатывает API запросы
-type Handler struct {
-	storage        *storage.WebStorage
-	authService    *auth.Service
-	copyTradingWeb *copytrading.WebService
-	mirrorManager  *MirrorManager
-	apiURL         string
-	logger         *slog.Logger
+type SessionManager struct {
 }
 
-// New создает новый API handler
-func New(storage *storage.WebStorage, authService *auth.Service, copyTradingWeb *copytrading.WebService, apiURL string, logger *slog.Logger) *Handler {
+// Handler обрабатывает API запросы
+type Handler struct {
+	storage              *storage.WebStorage
+	authService          *auth.Service
+	manager              *copytrading.Manager
+	mirrorManager        *mirrorTokenManager
+	wsCopyTradingManager *wsCopyTradingManager
+	apiURL               string
+	logger               *slog.Logger
+}
+
+func New(
+	storage *storage.WebStorage,
+	authService *auth.Service,
+	manager *copytrading.Manager,
+	apiURL string,
+	logger *slog.Logger,
+) *Handler {
 	return &Handler{
-		storage:        storage,
-		authService:    authService,
-		copyTradingWeb: copyTradingWeb,
-		mirrorManager:  NewMirrorManager(logger),
-		apiURL:         apiURL,
-		logger:         logger,
+		storage:     storage,
+		authService: authService,
+		manager:     manager,
+		mirrorManager: &mirrorTokenManager{
+			tokens: make(map[string]*mirrorToken),
+			logger: logger,
+		},
+		wsCopyTradingManager: &wsCopyTradingManager{
+			connections: make(map[int]*wscopytrading.Service),
+			logger:      logger,
+			manager:     manager,
+		},
+		apiURL: apiURL,
+		logger: logger,
 	}
 }
 

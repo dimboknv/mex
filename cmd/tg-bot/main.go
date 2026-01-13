@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"tg_mexc/internal/handlers"
 	"tg_mexc/pkg/config"
-	"tg_mexc/pkg/services/copytrading"
 	"tg_mexc/pkg/services/telegram"
 	"tg_mexc/pkg/storage"
 	"time"
@@ -65,10 +64,10 @@ func main() {
 	}
 
 	// Инициализация Copy Trading сервиса
-	copyTradingService := copytrading.New(store, logger, cfg.DryRun)
+	// copyTradingService := copytrading.New(store, logger, cfg.DryRun)
 
 	// Создание обработчика
-	handler := handlers.New(store, tgService, copyTradingService, logger)
+	handler := handlers.New(store, tgService, nil, logger)
 
 	// Запуск бота
 	logger.Info("🚀 Starting bot...")

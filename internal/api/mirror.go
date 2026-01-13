@@ -2,23 +2,17 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"tg_mexc/internal/middleware"
-	"tg_mexc/pkg/models"
-	"tg_mexc/pkg/services/mexc"
+	"tg_mexc/pkg/services/copytrading"
 )
-
-// Подавление предупреждения о неиспользуемых импортах
-var _ = models.Account{}
 
 // MirrorRequest - данные перехваченного запроса
 type MirrorRequest struct {
@@ -28,148 +22,6 @@ type MirrorRequest struct {
 	RequestBody  any    `json:"requestBody"`
 	ResponseData any    `json:"responseData"`
 	Timestamp    int64  `json:"timestamp"`
-}
-
-// MirrorToken - токен для идентификации пользователя
-type MirrorToken struct {
-	Token     string
-	UserID    int
-	Username  string
-	CreatedAt time.Time
-	Active    bool // состояние активности mirror mode
-}
-
-// MirrorManager управляет mirror токенами и сессиями
-type MirrorManager struct {
-	tokens map[string]*MirrorToken // token -> MirrorToken
-	mu     sync.RWMutex
-	logger *slog.Logger
-}
-
-// NewMirrorManager создает новый менеджер
-func NewMirrorManager(logger *slog.Logger) *MirrorManager {
-	return &MirrorManager{
-		tokens: make(map[string]*MirrorToken),
-		logger: logger,
-	}
-}
-
-// GenerateToken создает новый токен для пользователя
-func (m *MirrorManager) GenerateToken(userID int, username string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Удаляем старый токен если есть
-	for token, mt := range m.tokens {
-		if mt.UserID == userID {
-			delete(m.tokens, token)
-			break
-		}
-	}
-
-	// Генерируем новый токен
-	bytes := make([]byte, 16)
-	rand.Read(bytes)
-	token := hex.EncodeToString(bytes)
-
-	m.tokens[token] = &MirrorToken{
-		Token:     token,
-		UserID:    userID,
-		Username:  username,
-		CreatedAt: time.Now(),
-	}
-
-	return token
-}
-
-// ValidateToken проверяет токен и возвращает данные пользователя
-func (m *MirrorManager) ValidateToken(token string) (*MirrorToken, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	mt, ok := m.tokens[token]
-
-	return mt, ok
-}
-
-// SetActive устанавливает состояние активности для пользователя
-func (m *MirrorManager) SetActive(userID int, active bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, mt := range m.tokens {
-		if mt.UserID == userID {
-			mt.Active = active
-			m.logger.Info("Mirror mode state changed",
-				slog.Int("user_id", userID),
-				slog.Bool("active", active))
-			return
-		}
-	}
-}
-
-// IsActive проверяет, активен ли mirror mode для пользователя
-func (m *MirrorManager) IsActive(userID int) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, mt := range m.tokens {
-		if mt.UserID == userID {
-			return mt.Active
-		}
-	}
-	return false
-}
-
-// GetTokenForUser возвращает токен для пользователя (или генерирует новый если нет)
-func (m *MirrorManager) GetTokenForUser(userID int, username string) string {
-	m.mu.RLock()
-	for _, mt := range m.tokens {
-		if mt.UserID == userID {
-			m.mu.RUnlock()
-			return mt.Token
-		}
-	}
-	m.mu.RUnlock()
-
-	// Токена нет, генерируем новый
-	return m.GenerateToken(userID, username)
-}
-
-// HandleMirrorReceive принимает перехваченные запросы (старый формат - JSON wrapper)
-func (h *Handler) HandleMirrorReceive(w http.ResponseWriter, r *http.Request) {
-	// Получаем токен из header
-	token := r.Header.Get("X-Mirror-Token")
-	if token == "" {
-		h.respondError(w, http.StatusUnauthorized, "Missing token")
-		return
-	}
-
-	// Валидируем токен
-	mirrorToken, ok := h.mirrorManager.ValidateToken(token)
-	if !ok {
-		h.respondError(w, http.StatusUnauthorized, "Invalid token")
-		return
-	}
-
-	// Парсим тело запроса
-	var req MirrorRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.respondError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	// Логируем перехваченный запрос
-	h.logger.Info("🔵 Mirror request received",
-		slog.String("user", mirrorToken.Username),
-		slog.Int("user_id", mirrorToken.UserID),
-		slog.String("url", req.URL),
-		slog.String("method", req.Method),
-		slog.Any("request_body", req.RequestBody),
-		slog.Any("response_data", req.ResponseData),
-	)
-
-	h.respondSuccess(w, "OK", nil)
 }
 
 // HandleMirrorAPI обрабатывает прямые API запросы от browser mirror
@@ -189,7 +41,9 @@ func (h *Handler) HandleMirrorAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Проверяем, активен ли mirror mode для этого пользователя
-	if !mirrorToken.Active {
+	// Обрабатываем запрос в зависимости от пути
+	session, err := h.manager.GetSession(mirrorToken.UserID, "mirror")
+	if err != nil {
 		h.logger.Debug("Mirror request ignored - mirror mode not active",
 			slog.Int("user_id", mirrorToken.UserID))
 		w.WriteHeader(http.StatusOK)
@@ -217,282 +71,159 @@ func (h *Handler) HandleMirrorAPI(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Запускаем обработку в горутине и сразу отвечаем 200 OK
-	go h.processMirrorRequest(mirrorToken.UserID, path, body)
+	go h.processMirrorRequest(session, path, body)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"success":true}`))
 }
 
 // processMirrorRequest обрабатывает mirror запрос и выполняет его на slave аккаунтах
-func (h *Handler) processMirrorRequest(userID int, path string, body []byte) {
-	ctx := context.Background()
+func (h *Handler) processMirrorRequest(session *copytrading.Session, path string, body []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Получаем slave аккаунты
-	slaves, err := h.storage.GetSlaveAccounts(userID, false)
-	if err != nil {
-		h.logger.Error("Failed to get slave accounts",
-			slog.Int("user_id", userID),
-			slog.Any("error", err))
-		return
-	}
-
-	if len(slaves) == 0 {
-		h.logger.Info("No slave accounts found",
-			slog.Int("user_id", userID))
-		return
-	}
-
-	h.logger.Info("🚀 Processing mirror request for slaves",
-		slog.Int("user_id", userID),
-		slog.String("path", path),
-		slog.Int("slave_count", len(slaves)))
-
-	// Обрабатываем запрос в зависимости от пути
 	switch {
 	case strings.HasSuffix(path, "/order/create"):
-		h.mirrorOrderCreate(ctx, slaves, body)
+		return h.mirrorOrderCreate(ctx, session, body)
 	case strings.HasSuffix(path, "/planorder/place"):
-		h.mirrorPlanOrderPlace(ctx, slaves, body)
+		return h.mirrorPlanOrderPlace(ctx, session, body)
 	case strings.HasSuffix(path, "/stoporder/cancel"):
-		h.mirrorStopOrderCancel(ctx, slaves, body)
+		return h.mirrorStopOrderCancel(ctx, session, body)
 	case strings.HasSuffix(path, "/stoporder/change_plan_price"):
-		h.mirrorChangePlanPrice(ctx, slaves, body)
-	// case strings.HasSuffix(path, "/change_leverage"):
-	// 	h.mirrorChangeLeverage(ctx, slaves, body)
+		return h.mirrorChangePlanPrice(ctx, session, body)
+	case strings.HasSuffix(path, "/change_leverage"):
+		return h.mirrorChangeLeverage(ctx, session, body)
 	default:
-		h.logger.Warn("Unknown mirror path",
-			slog.String("path", path))
+		return fmt.Errorf("unknown mirror path: %s", path)
 	}
 }
 
 // mirrorOrderCreate дублирует создание ордера на slave аккаунты
 // Поддерживает открытие (side 1, 3) и закрытие (side 2, 4) позиций
-func (h *Handler) mirrorOrderCreate(ctx context.Context, slaves []models.Account, body []byte) {
-	// Парсим для логирования
-	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("Failed to parse order create request", slog.Any("error", err))
-		return
+func (h *Handler) mirrorOrderCreate(ctx context.Context, session *copytrading.Session, body []byte) error {
+	openReq, closeReq, err := parseMirrorOrderCreate(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse order create request: %w", err)
 	}
 
-	symbol, _ := req["symbol"].(string)
-	side, _ := req["side"].(float64)
-	vol, _ := req["vol"].(float64)
-	leverage, _ := req["leverage"].(float64)
+	var result copytrading.ExecutionResult
+	var orderType string
 
-	// Определяем тип операции
-	orderType := "OPEN"
-	if int(side) == 2 || int(side) == 4 {
-		orderType = "CLOSE"
+	if openReq != nil {
+		// todo: logs:
+		result, err = session.OpenPosition(ctx, *openReq)
+	} else {
+		// todo: logs:
+		result, err = session.ClosePosition(ctx, *closeReq)
 	}
 
-	h.logger.Info("📊 Mirror order create",
-		slog.String("type", orderType),
-		slog.String("symbol", symbol),
-		slog.Int("side", int(side)),
-		slog.Int("vol", int(vol)),
-		slog.Int("leverage", int(leverage)))
+	if err != nil {
+		return fmt.Errorf("failed to execute mirror order create: %w", err)
+	}
 
-	var wg sync.WaitGroup
-	for _, slave := range slaves {
-		wg.Add(1)
-		go func(acc models.Account) {
-			defer wg.Done()
-
-			client, err := mexc.NewClient(acc, h.logger)
-			if err != nil {
-				h.logger.Error("Failed to create MEXC client",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			// Используем PlaceOrderRaw для точной репликации запроса
-			orderID, err := client.PlaceOrderRaw(ctx, body)
-			if err != nil {
-				h.logger.Error("❌ Mirror order failed",
-					slog.String("account", acc.Name),
-					slog.String("type", orderType),
-					slog.Any("error", err))
-				return
-			}
-
+	// Логируем результаты
+	for _, r := range result.Results {
+		if r.Success {
 			h.logger.Info("✅ Mirror order success",
-				slog.String("account", acc.Name),
+				slog.String("account", r.AccountName),
 				slog.String("type", orderType),
-				slog.String("order_id", orderID))
-		}(slave)
+				slog.String("order_id", r.OrderID))
+		} else {
+			h.logger.Error("❌ Mirror order failed",
+				slog.String("account", r.AccountName),
+				slog.String("type", orderType),
+				slog.String("error", r.Error))
+		}
 	}
-	wg.Wait()
+
+	return nil
 }
 
 // mirrorPlanOrderPlace дублирует установку SL/TP на slave аккаунты
-func (h *Handler) mirrorPlanOrderPlace(ctx context.Context, slaves []models.Account, body []byte) {
-	// Парсим для логирования
-	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("Failed to parse plan order place request", slog.Any("error", err))
-		return
+func (h *Handler) mirrorPlanOrderPlace(ctx context.Context, session *copytrading.Session, body []byte) error {
+	req, err := parseMirrorStopLoss(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse plan order place request: %w", err)
 	}
-
-	symbol, _ := req["symbol"].(string)
-	stopLossPrice, _ := req["stopLossPrice"].(float64)
-	takeProfitPrice, _ := req["takeProfitPrice"].(float64)
 
 	h.logger.Info("📊 Mirror plan order place",
-		slog.String("symbol", symbol),
-		slog.Float64("stop_loss", stopLossPrice),
-		slog.Float64("take_profit", takeProfitPrice))
+		slog.String("symbol", req.Symbol),
+		slog.Float64("stop_loss", req.StopLossPrice),
+		slog.Float64("take_profit", req.TakeProfitPrice))
 
-	var wg sync.WaitGroup
-	for _, slave := range slaves {
-		wg.Add(1)
-		go func(acc models.Account) {
-			defer wg.Done()
-
-			client, err := mexc.NewClient(acc, h.logger)
-			if err != nil {
-				h.logger.Error("Failed to create MEXC client",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			err = client.SetStopLossRaw(ctx, body)
-			if err != nil {
-				h.logger.Error("❌ Mirror set SL/TP failed",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			h.logger.Info("✅ Mirror set SL/TP success",
-				slog.String("account", acc.Name))
-		}(slave)
+	result, err := session.PlacePlanOrder(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to execute mirror plan order place: %w", err)
 	}
-	wg.Wait()
+
+	// Логируем результаты
+	for _, r := range result.Results {
+		if r.Success {
+			h.logger.Info("✅ Mirror set SL/TP success",
+				slog.String("account", r.AccountName))
+		} else {
+			h.logger.Error("❌ Mirror set SL/TP failed",
+				slog.String("account", r.AccountName),
+				slog.String("error", r.Error))
+		}
+	}
+
+	return nil
 }
 
 // mirrorStopOrderCancel дублирует отмену stop order на slave аккаунты
-func (h *Handler) mirrorStopOrderCancel(ctx context.Context, slaves []models.Account, body []byte) {
-	h.logger.Info("📊 Mirror stop order cancel")
-
-	var wg sync.WaitGroup
-	for _, slave := range slaves {
-		wg.Add(1)
-		go func(acc models.Account) {
-			defer wg.Done()
-
-			client, err := mexc.NewClient(acc, h.logger)
-			if err != nil {
-				h.logger.Error("Failed to create MEXC client",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			err = client.CancelStopLossRaw(ctx, body)
-			if err != nil {
-				h.logger.Error("❌ Mirror cancel stop order failed",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-			} else {
-				h.logger.Info("✅ Mirror cancel stop order success",
-					slog.String("account", acc.Name))
-			}
-		}(slave)
+func (h *Handler) mirrorStopOrderCancel(ctx context.Context, session *copytrading.Session, body []byte) error {
+	orderIDs, err := parseMirrorCancelStopOrder(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse cancel stop order request: %w", err)
 	}
-	wg.Wait()
+
+	if _, err := session.CancelStopOrder(ctx, orderIDs); err != nil {
+		return fmt.Errorf("failed to execute mirror stop order cancel: %w", err)
+	}
+
+	return nil
+
 }
 
 // mirrorChangePlanPrice дублирует изменение цены stop loss на slave аккаунты
-func (h *Handler) mirrorChangePlanPrice(ctx context.Context, slaves []models.Account, body []byte) {
-	// Парсим для логирования
-	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("Failed to parse change plan price request", slog.Any("error", err))
-		return
+func (h *Handler) mirrorChangePlanPrice(ctx context.Context, session *copytrading.Session, body []byte) error {
+	req, err := parseChangePlanPrice(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse change plan price request")
 	}
 
-	stopLossPrice, _ := req["stopLossPrice"].(float64)
-
-	h.logger.Info("📊 Mirror change plan price",
-		slog.Float64("stop_loss_price", stopLossPrice))
-
-	var wg sync.WaitGroup
-	for _, slave := range slaves {
-		wg.Add(1)
-		go func(acc models.Account) {
-			defer wg.Done()
-
-			client, err := mexc.NewClient(acc, h.logger)
-			if err != nil {
-				h.logger.Error("Failed to create MEXC client",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			err = client.ChangeStopLossRaw(ctx, body)
-			if err != nil {
-				h.logger.Error("❌ Mirror change stop loss failed",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			h.logger.Info("✅ Mirror change stop loss success",
-				slog.String("account", acc.Name))
-		}(slave)
+	if _, err := session.ChangePlanPrice(ctx, req); err != nil {
+		return fmt.Errorf("failed to execute mirror change plan price: %w", err)
 	}
-	wg.Wait()
+
+	return nil
 }
 
 // mirrorChangeLeverage дублирует изменение leverage на slave аккаунты
-func (h *Handler) mirrorChangeLeverage(ctx context.Context, slaves []models.Account, body []byte) {
-	// Парсим для логирования
-	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
-		h.logger.Error("Failed to parse change leverage request", slog.Any("error", err))
-		return
+func (h *Handler) mirrorChangeLeverage(ctx context.Context, session *copytrading.Session, body []byte) error {
+	req, err := parseMirrorChangeLeverage(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse change leverage request: %w", err)
 	}
 
-	symbol, _ := req["symbol"].(string)
-	leverage, _ := req["leverage"].(float64)
-	positionType, _ := req["positionType"].(float64)
+	result, err := session.ChangeLeverage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to execute mirror change leverage: %w", err)
+	}
 
-	h.logger.Info("📊 Mirror change leverage",
-		slog.String("symbol", symbol),
-		slog.Int("leverage", int(leverage)),
-		slog.Int("position_type", int(positionType)))
-
-	var wg sync.WaitGroup
-	for _, slave := range slaves {
-		wg.Add(1)
-		go func(acc models.Account) {
-			defer wg.Done()
-
-			client, err := mexc.NewClient(acc, h.logger)
-			if err != nil {
-				h.logger.Error("Failed to create MEXC client",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
-			err = client.ChangeLeverageRaw(ctx, body)
-			if err != nil {
-				h.logger.Error("❌ Mirror change leverage failed",
-					slog.String("account", acc.Name),
-					slog.Any("error", err))
-				return
-			}
-
+	for _, r := range result.Results {
+		if r.Success {
 			h.logger.Info("✅ Mirror change leverage success",
-				slog.String("account", acc.Name))
-		}(slave)
+				slog.String("account", r.AccountName))
+		} else {
+			h.logger.Error("❌ Mirror change leverage failed",
+				slog.String("account", r.AccountName),
+				slog.String("error", r.Error))
+		}
 	}
-	wg.Wait()
+
+	return nil
 }
 
 // HandleGetMirrorScript возвращает JS код с токеном пользователя
@@ -595,28 +326,17 @@ type MirrorStatus struct {
 	MirrorURL string `json:"mirror_url,omitempty"`
 }
 
-// HandleStartMirror активирует Browser Mirror mode
 func (h *Handler) HandleStartMirror(w http.ResponseWriter, r *http.Request) {
 	userID, _ := h.getUserFromContext(r)
 	username, _ := h.getUsernameFromContext(r)
 
-	// Останавливаем WebSocket copy trading если активен
-	if h.copyTradingWeb.IsActive(userID) {
-		if err := h.copyTradingWeb.Stop(userID); err != nil {
-			h.logger.Warn("Failed to stop WebSocket copy trading",
-				slog.Int("user_id", userID),
-				slog.Any("error", err))
-		} else {
-			h.logger.Info("WebSocket copy trading stopped (switching to mirror mode)",
-				slog.Int("user_id", userID))
-		}
+	if _, err := h.manager.CreateOrGetActiveSession(userID, "mirror"); err != nil {
+		h.respondError(w, http.StatusConflict, err.Error())
+		return
 	}
 
 	// Получаем или генерируем токен
 	token := h.mirrorManager.GetTokenForUser(userID, username)
-
-	// Активируем mirror mode
-	h.mirrorManager.SetActive(userID, true)
 
 	h.respondSuccess(w, "Mirror mode started", map[string]any{
 		"token":      token,
@@ -624,30 +344,154 @@ func (h *Handler) HandleStartMirror(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleStopMirror деактивирует Browser Mirror mode
 func (h *Handler) HandleStopMirror(w http.ResponseWriter, r *http.Request) {
 	userID, _ := h.getUserFromContext(r)
 
-	h.mirrorManager.SetActive(userID, false)
+	// Останавливаем WebSocket copy trading если активен
+	if err := h.manager.StopSession(userID, "mirror"); err != nil {
+		h.respondError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	h.respondSuccess(w, "Mirror mode stopped", nil)
 }
 
-// HandleGetMirrorStatus возвращает статус mirror mode
 func (h *Handler) HandleGetMirrorStatus(w http.ResponseWriter, r *http.Request) {
 	userID, _ := h.getUserFromContext(r)
 	username, _ := h.getUsernameFromContext(r)
 
-	active := h.mirrorManager.IsActive(userID)
+	status := MirrorStatus{}
 
-	status := MirrorStatus{
-		Active: active,
-	}
-
-	if active {
+	if _, err := h.manager.GetSession(userID, "mirror"); err == nil {
+		status.Active = true
 		status.Token = h.mirrorManager.GetTokenForUser(userID, username)
 		status.MirrorURL = h.apiURL
 	}
 
 	h.respondSuccess(w, "", status)
+}
+
+type mirrorOrderCreate struct {
+	Symbol        string  `json:"symbol"`
+	Side          int     `json:"side"`
+	Vol           int     `json:"vol"`
+	Leverage      int     `json:"leverage"`
+	OpenType      int     `json:"openType"`
+	Type          any     `json:"type"` // может быть string или int
+	StopLossPrice string  `json:"stopLossPrice,omitempty"`
+	LossTrend     string  `json:"lossTrend,omitempty"`
+	PositionID    int64   `json:"positionId,omitempty"`
+	Price         float64 `json:"price,omitempty"`
+}
+
+func parseMirrorOrderCreate(body []byte) (*copytrading.OpenPositionRequest, *copytrading.ClosePositionRequest, error) {
+	var raw mirrorOrderCreate
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse order create: %w", err)
+	}
+
+	switch raw.Side {
+	case 1, 3: // open long, open short
+		var stopLoss float64
+		if raw.StopLossPrice != "" {
+			fmt.Sscanf(raw.StopLossPrice, "%f", &stopLoss)
+		}
+		return &copytrading.OpenPositionRequest{
+			Symbol:        raw.Symbol,
+			Side:          raw.Side,
+			Volume:        float64(raw.Vol),
+			Leverage:      raw.Leverage,
+			StopLossPrice: stopLoss,
+		}, nil, nil
+	case 2, 4: // close short, close long
+		return nil, &copytrading.ClosePositionRequest{Symbol: raw.Symbol}, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown side: %d", raw.Side)
+	}
+}
+
+type mirrorPlanOrderPlace struct {
+	Symbol          string  `json:"symbol"`
+	StopLossPrice   float64 `json:"stopLossPrice"`
+	TakeProfitPrice float64 `json:"takeProfitPrice"`
+	LossTrend       int     `json:"lossTrend"`
+	ProfitTrend     int     `json:"profitTrend"`
+}
+
+func parseMirrorStopLoss(body []byte) (copytrading.PlacePlanOrderRequest, error) {
+	var raw mirrorPlanOrderPlace
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return copytrading.PlacePlanOrderRequest{}, fmt.Errorf("failed to parse plan order place: %w", err)
+	}
+
+	return copytrading.PlacePlanOrderRequest{
+		Symbol:          raw.Symbol,
+		StopLossPrice:   raw.StopLossPrice,
+		TakeProfitPrice: raw.TakeProfitPrice,
+		LossTrend:       raw.LossTrend,
+		ProfitTrend:     raw.ProfitTrend,
+	}, nil
+}
+
+type mirrorStopOrderCancel struct {
+	StopPlanOrderID int `json:"stopPlanOrderId"`
+}
+
+func parseMirrorCancelStopOrder(body []byte) ([]int, error) {
+	var raw []mirrorStopOrderCancel
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse cancel stop order: %w", err)
+	}
+
+	res := make([]int, 0, len(raw))
+	for _, r := range raw {
+		res = append(res, r.StopPlanOrderID)
+	}
+
+	return res, nil
+}
+
+type mirrorChangePlanPrice struct {
+	StopPlanOrderID   int     `json:"stopPlanOrderId"`
+	StopLossPrice     float64 `json:"stopLossPrice"`
+	LossTrend         int     `json:"lossTrend"`
+	ProfitTrend       int     `json:"profitTrend"`
+	StopLossReverse   int     `json:"stopLossReverse"`
+	TakeProfitReverse int     `json:"takeProfitReverse"`
+}
+
+func parseChangePlanPrice(body []byte) (copytrading.ChangePlanPriceRequest, error) {
+	var raw mirrorChangePlanPrice
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return copytrading.ChangePlanPriceRequest{}, fmt.Errorf("failed to parse change plan price: %w", err)
+	}
+	return copytrading.ChangePlanPriceRequest{
+		StopPlanOrderID:   raw.StopPlanOrderID,
+		StopLossPrice:     raw.StopLossPrice,
+		LossTrend:         raw.LossTrend,
+		ProfitTrend:       raw.ProfitTrend,
+		StopLossReverse:   raw.StopLossReverse,
+		TakeProfitReverse: raw.TakeProfitReverse,
+	}, nil
+}
+
+type mirrorChangeLeverage struct {
+	Symbol       string `json:"symbol"`
+	Leverage     int    `json:"leverage"`
+	OpenType     int    `json:"openType"`
+	PositionType int    `json:"positionType"`
+}
+
+func parseMirrorChangeLeverage(body []byte) (copytrading.ChangeLeverageRequest, error) {
+	var raw mirrorChangeLeverage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return copytrading.ChangeLeverageRequest{}, fmt.Errorf("failed to parse change leverage: %w", err)
+	}
+
+	return copytrading.ChangeLeverageRequest{
+		Symbol:       raw.Symbol,
+		Leverage:     raw.Leverage,
+		OpenType:     raw.OpenType,
+		PositionType: raw.PositionType,
+	}, nil
 }

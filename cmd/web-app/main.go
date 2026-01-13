@@ -93,10 +93,11 @@ func main() {
 	authService := auth.NewService(jwtSecret, 24*time.Hour) // Токен действителен 24 часа
 
 	// Инициализация copy trading сервиса для Web App
-	copyTradingService := copytrading.NewWebService(webStorage, logger, dryRun)
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
+	manager := copytrading.NewManager(engine, dryRun, logger)
 
 	// Инициализация API handler
-	apiHandler := api.New(webStorage, authService, copyTradingService, apiURL, logger)
+	apiHandler := api.New(webStorage, authService, manager, apiURL, logger)
 
 	// Настройка роутинга (статика встроена через go:embed)
 	router := apiHandler.SetupRouter()
@@ -129,7 +130,7 @@ func main() {
 	logger.Info("🛑 Shutting down server...")
 
 	// Останавливаем все активные сессии copy trading
-	copyTradingService.StopAll()
+	manager.StopAllSessions()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

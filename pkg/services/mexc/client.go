@@ -493,8 +493,8 @@ func (c *Client) ClosePosition(ctx context.Context, symbol string) error {
 	return nil
 }
 
-// SetStopLoss устанавливает Stop Loss и Take Profit для позиции
-func (c *Client) SetStopLoss(ctx context.Context, symbol string, stopLossPrice, takeProfitPrice float64) error {
+// PlacePlanOrder устанавливает Stop Loss и Take Profit для позиции
+func (c *Client) PlacePlanOrder(ctx context.Context, symbol string, stopLossPrice, takeProfitPrice float64) error {
 	timestamp := time.Now().UnixMilli()
 
 	stopLossReq := models.StopLossRequest{
@@ -590,8 +590,8 @@ func (c *Client) GetOpenStopOrders(ctx context.Context, symbol string) ([]models
 	return result.Data, nil
 }
 
-// CancelStopLoss отменяет стоп-ордер по ID
-func (c *Client) CancelStopLoss(ctx context.Context, stopPlanOrderID int64) error {
+// CancelStopOrder отменяет стоп-ордер по ID
+func (c *Client) CancelStopOrder(ctx context.Context, stopPlanOrderID int64) error {
 	timestamp := time.Now().UnixMilli()
 
 	cancelItems := []models.StopOrderCancelItem{
@@ -679,8 +679,8 @@ func (c *Client) CancelAllStopLossBySymbol(ctx context.Context, symbol string) e
 	return nil
 }
 
-// ChangeStopLoss изменяет цену stop loss для существующего ордера
-func (c *Client) ChangeStopLoss(ctx context.Context, req1 models.ChangePlanPriceRequest) error {
+// ChangePlanPrice изменяет цену stop loss для существующего ордера
+func (c *Client) ChangePlanPrice(ctx context.Context, req1 models.ChangePlanPriceRequest) error {
 	timestamp := time.Now().UnixMilli()
 
 	body, _ := json.Marshal(req1)

@@ -10,6 +10,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/lmittmann/tint v1.1.2
 	golang.org/x/crypto v0.46.0
+	golang.org/x/sync v0.19.0
 	modernc.org/sqlite v1.43.0
 )
 

@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"tg_mexc/pkg/models"
 	"time"
+
+	"tg_mexc/pkg/models"
 
 	_ "modernc.org/sqlite"
 )
@@ -43,7 +45,7 @@ func (s *WebStorage) init() error {
 -- Web App Database Schema
 
 -- Пользователи веб-приложения
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE if NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
@@ -51,10 +53,10 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- Аккаунты MEXC
-CREATE TABLE IF NOT EXISTS accounts (
+CREATE TABLE if NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
+    NAME TEXT NOT NULL,
     token TEXT NOT NULL,
     user_id_mexc TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -65,15 +67,15 @@ CREATE TABLE IF NOT EXISTS accounts (
     disabled INTEGER DEFAULT 0,
     auto_disable_on_fee INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, name),
+    UNIQUE(user_id, NAME),
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
-CREATE INDEX IF NOT EXISTS idx_accounts_master ON accounts(user_id, is_master);
+CREATE INDEX if NOT EXISTS idx_accounts_user ON accounts(user_id);
+CREATE INDEX if NOT EXISTS idx_accounts_master ON accounts(user_id, is_master);
 
 -- История сделок (детальная)
-CREATE TABLE IF NOT EXISTS trades (
+CREATE TABLE if NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     master_account_id INTEGER,
@@ -91,12 +93,12 @@ CREATE TABLE IF NOT EXISTS trades (
     FOREIGN KEY(master_account_id) REFERENCES accounts(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_trades_user ON trades(user_id);
-CREATE INDEX IF NOT EXISTS idx_trades_sent ON trades(sent_at DESC);
-CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+CREATE INDEX if NOT EXISTS idx_trades_user ON trades(user_id);
+CREATE INDEX if NOT EXISTS idx_trades_sent ON trades(sent_at DESC);
+CREATE INDEX if NOT EXISTS idx_trades_status ON trades(status);
 
 -- Детали по каждому slave аккаунту в сделке
-CREATE TABLE IF NOT EXISTS trade_details (
+CREATE TABLE if NOT EXISTS trade_details (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trade_id INTEGER NOT NULL,
     account_id INTEGER NOT NULL,
@@ -109,27 +111,27 @@ CREATE TABLE IF NOT EXISTS trade_details (
     FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_trade_details_trade ON trade_details(trade_id);
-CREATE INDEX IF NOT EXISTS idx_trade_details_account ON trade_details(account_id);
+CREATE INDEX if NOT EXISTS idx_trade_details_trade ON trade_details(trade_id);
+CREATE INDEX if NOT EXISTS idx_trade_details_account ON trade_details(account_id);
 
 -- Лог активности
-CREATE TABLE IF NOT EXISTS activity_log (
+CREATE TABLE if NOT EXISTS activity_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
-    level TEXT NOT NULL,
-    action TEXT NOT NULL,
+    LEVEL TEXT NOT NULL,
+    ACTION TEXT NOT NULL,
     message TEXT NOT NULL,
     details TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
-CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_log_level ON activity_log(level);
+CREATE INDEX if NOT EXISTS idx_activity_log_user ON activity_log(user_id);
+CREATE INDEX if NOT EXISTS idx_activity_log_created ON activity_log(created_at DESC);
+CREATE INDEX if NOT EXISTS idx_activity_log_level ON activity_log(LEVEL);
 
 -- Copy Trading Sessions
-CREATE TABLE IF NOT EXISTS copy_trading_sessions (
+CREATE TABLE if NOT EXISTS copy_trading_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     master_account_id INTEGER NOT NULL,
@@ -141,8 +143,8 @@ CREATE TABLE IF NOT EXISTS copy_trading_sessions (
     FOREIGN KEY(master_account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON copy_trading_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_active ON copy_trading_sessions(is_active);
+CREATE INDEX if NOT EXISTS idx_sessions_user ON copy_trading_sessions(user_id);
+CREATE INDEX if NOT EXISTS idx_sessions_active ON copy_trading_sessions(is_active);
 `
 
 	_, err := s.db.Exec(migrationSQL)
@@ -215,7 +217,7 @@ func (s *WebStorage) GetUserByID(id int) (*models.User, error) {
 func (s *WebStorage) AccountExistsByMexcUID(userID int, mexcUID string) (bool, error) {
 	var count int
 	err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM accounts
+		SELECT count(*) FROM accounts
 		WHERE user_id = ? AND user_id_mexc = ?
 	`, userID, mexcUID).Scan(&count)
 	if err != nil {
@@ -247,8 +249,8 @@ func (s *WebStorage) AddAccount(userID int, name string, data models.BrowserData
 func (s *WebStorage) GetAccounts(userID int) ([]models.Account, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, token, user_id_mexc, device_id,
-		       COALESCE(cookies, '{}'), COALESCE(user_agent, ''), COALESCE(proxy, ''),
-		       COALESCE(is_master, 0), COALESCE(disabled, 0)
+		       coalesce(cookies, '{}'), coalesce(user_agent, ''), coalesce(proxy, ''),
+		       coalesce(is_master, 0), coalesce(disabled, 0)
 		FROM accounts
 		WHERE user_id = ?
 		ORDER BY id
@@ -365,37 +367,37 @@ func (s *WebStorage) UpdateAutoDisableOnFee(userID int, accountID int, autoDisab
 }
 
 // GetMasterAccount возвращает главный аккаунт
-func (s *WebStorage) GetMasterAccount(userID int) (*models.Account, error) {
+func (s *WebStorage) GetMasterAccount(userID int) (models.Account, error) {
 	var acc models.Account
 	var cookiesJSON string
 	var isMasterInt, disabledInt int
 
 	err := s.db.QueryRow(`
 		SELECT id, name, token, user_id_mexc, device_id,
-		       COALESCE(cookies, '{}'), COALESCE(user_agent, ''), COALESCE(proxy, ''),
-		       COALESCE(is_master, 0), COALESCE(disabled, 0)
+		       coalesce(cookies, '{}'), coalesce(user_agent, ''), coalesce(proxy, ''),
+		       coalesce(is_master, 0), coalesce(disabled, 0)
 		FROM accounts
 		WHERE user_id = ? AND is_master = 1
 		LIMIT 1
 	`, userID).Scan(&acc.ID, &acc.Name, &acc.Token, &acc.UserID,
 		&acc.DeviceID, &cookiesJSON, &acc.UserAgent, &acc.Proxy, &isMasterInt, &disabledInt)
 	if err != nil {
-		return nil, err
+		return models.Account{}, err
 	}
 
 	json.Unmarshal([]byte(cookiesJSON), &acc.Cookies)
 	acc.IsMaster = isMasterInt == 1
 	acc.Disabled = disabledInt == 1
 
-	return &acc, nil
+	return acc, nil
 }
 
 // GetSlaveAccounts возвращает все slave аккаунты
 func (s *WebStorage) GetSlaveAccounts(userID int, includeDisabled bool) ([]models.Account, error) {
 	query := `
 		SELECT id, name, token, user_id_mexc, device_id,
-		       COALESCE(cookies, '{}'), COALESCE(user_agent, ''), COALESCE(proxy, ''),
-		       COALESCE(is_master, 0), COALESCE(disabled, 0)
+		       coalesce(cookies, '{}'), coalesce(user_agent, ''), coalesce(proxy, ''),
+		       coalesce(is_master, 0), coalesce(disabled, 0)
 		FROM accounts
 		WHERE user_id = ? AND is_master = 0`
 
@@ -435,7 +437,7 @@ func (s *WebStorage) GetSlaveAccounts(userID int, includeDisabled bool) ([]model
 // === Trades History ===
 
 // CreateTrade создает новую запись сделки
-func (s *WebStorage) CreateTrade(trade *models.Trade) (int, error) {
+func (s *WebStorage) CreateTrade(_ context.Context, trade models.Trade) (int, error) {
 	result, err := s.db.Exec(`
 		INSERT INTO trades (user_id, master_account_id, symbol, side, volume, leverage, sent_at, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -456,13 +458,13 @@ func (s *WebStorage) UpdateTradeReceived(tradeID int, receivedAt time.Time) erro
 }
 
 // UpdateTradeStatus обновляет статус сделки
-func (s *WebStorage) UpdateTradeStatus(tradeID int, status string, errorMsg string) error {
+func (s *WebStorage) UpdateTradeStatus(_ context.Context, tradeID int, status string, errorMsg string) error {
 	_, err := s.db.Exec("UPDATE trades SET status = ?, error = ? WHERE id = ?", status, errorMsg, tradeID)
 	return err
 }
 
 // AddTradeDetail добавляет детали выполнения сделки на аккаунте
-func (s *WebStorage) AddTradeDetail(detail *models.TradeDetail) error {
+func (s *WebStorage) AddTradeDetail(_ context.Context, detail models.TradeDetail) error {
 	_, err := s.db.Exec(`
 		INSERT INTO trade_details (trade_id, account_id, status, error, order_id, latency_ms)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -474,8 +476,8 @@ func (s *WebStorage) AddTradeDetail(detail *models.TradeDetail) error {
 // GetTrades получает историю сделок с пагинацией
 func (s *WebStorage) GetTrades(userID int, limit, offset int) ([]models.Trade, error) {
 	rows, err := s.db.Query(`
-		SELECT t.id, t.user_id, t.master_account_id, COALESCE(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
-		       t.sent_at, t.received_at, t.exchange_accepted_at, t.status, COALESCE(t.error, ''), t.created_at
+		SELECT t.id, t.user_id, t.master_account_id, coalesce(a.name, ''), t.symbol, t.side, t.volume, t.leverage,
+		       t.sent_at, t.received_at, t.exchange_accepted_at, t.status, coalesce(t.error, ''), t.created_at
 		FROM trades t
 		LEFT JOIN accounts a ON t.master_account_id = a.id
 		WHERE t.user_id = ?
@@ -512,8 +514,8 @@ func (s *WebStorage) GetTrades(userID int, limit, offset int) ([]models.Trade, e
 // GetTradeDetails получает детали сделки
 func (s *WebStorage) GetTradeDetails(tradeID int) ([]models.TradeDetail, error) {
 	rows, err := s.db.Query(`
-		SELECT td.id, td.trade_id, td.account_id, a.name, td.status, COALESCE(td.error, ''),
-		       COALESCE(td.order_id, ''), COALESCE(td.latency_ms, 0), td.created_at
+		SELECT td.id, td.trade_id, td.account_id, a.name, td.status, coalesce(td.error, ''),
+		       coalesce(td.order_id, ''), coalesce(td.latency_ms, 0), td.created_at
 		FROM trade_details td
 		LEFT JOIN accounts a ON td.account_id = a.id
 		WHERE td.trade_id = ?
@@ -545,7 +547,7 @@ func (s *WebStorage) GetTradeDetails(tradeID int) ([]models.TradeDetail, error) 
 // === Activity Log ===
 
 // AddLog добавляет запись в лог
-func (s *WebStorage) AddLog(log *models.ActivityLog) error {
+func (s *WebStorage) AddLog(_ context.Context, log models.ActivityLog) error {
 	_, err := s.db.Exec(`
 		INSERT INTO activity_log (user_id, level, action, message, details)
 		VALUES (?, ?, ?, ?, ?)
@@ -557,7 +559,7 @@ func (s *WebStorage) AddLog(log *models.ActivityLog) error {
 // GetLogs получает логи с пагинацией
 func (s *WebStorage) GetLogs(userID int, limit, offset int) ([]models.ActivityLog, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, level, action, message, COALESCE(details, ''), created_at
+		SELECT id, user_id, level, ACTION, message, COALESCE(details, ''), created_at
 		FROM activity_log
 		WHERE user_id = ? OR user_id IS NULL
 		ORDER BY created_at DESC
@@ -591,7 +593,7 @@ func (s *WebStorage) GetLogs(userID int, limit, offset int) ([]models.ActivityLo
 func (s *WebStorage) HasActiveCopyTradingSession(userID int) (bool, error) {
 	var count int
 	err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM copy_trading_sessions
+		SELECT count(*) FROM copy_trading_sessions
 		WHERE user_id = ? AND is_active = 1
 	`, userID).Scan(&count)
 	if err != nil {

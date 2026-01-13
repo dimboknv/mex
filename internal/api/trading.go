@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+
 	"tg_mexc/internal/middleware"
 )
 
@@ -30,21 +31,17 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Останавливаем Mirror mode если активен
-	if h.mirrorManager.IsActive(userID) {
-		h.mirrorManager.SetActive(userID, false)
-		h.logger.Info("Mirror mode stopped (switching to WebSocket copy trading)",
-			"user_id", userID)
-	}
-
-	// Проверяем наличие мастер аккаунта
 	master, err := h.storage.GetMasterAccount(userID)
 	if err != nil {
 		h.respondError(w, http.StatusBadRequest, "Master account not set")
 		return
 	}
 
-	// Получаем slave аккаунты
+	if err := h.wsCopyTradingManager.starSession(userID); err != nil {
+		h.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	slaves, err := h.storage.GetSlaveAccounts(userID, req.IgnoreFees)
 	if err != nil {
 		h.logger.Error("Failed to get slave accounts", "error", err)
@@ -52,33 +49,20 @@ func (h *Handler) HandleStartCopyTrading(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if len(slaves) == 0 {
-		h.respondError(w, http.StatusBadRequest, "No active slave accounts")
-		return
-	}
-
-	// Запускаем copy trading через WebService
-	if err := h.copyTradingWeb.Start(userID, req.IgnoreFees); err != nil {
-		h.logger.Error("Failed to start copy trading", "error", err, "user_id", userID)
-		h.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
 	h.respondSuccess(w, "Copy trading started successfully", map[string]any{
 		"master":  master.Name,
 		"slaves":  len(slaves),
-		"dry_run": h.copyTradingWeb.IsDryRun(),
+		"dry_run": h.manager.IsDryRun(),
 	})
 }
 
 // HandleStopCopyTrading останавливает copy trading
 func (h *Handler) HandleStopCopyTrading(w http.ResponseWriter, r *http.Request) {
-	userID, _ := middleware.GetUserID(r.Context())
+	userID, _ := h.getUserFromContext(r)
 
-	// Останавливаем copy trading через WebService
-	if err := h.copyTradingWeb.Stop(userID); err != nil {
-		h.logger.Error("Failed to stop copy trading", "error", err, "user_id", userID)
-		h.respondError(w, http.StatusBadRequest, err.Error())
+	// Останавливаем WebSocket copy trading если активен
+	if err := h.wsCopyTradingManager.stopSession(userID); err != nil {
+		h.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
 
@@ -94,7 +78,7 @@ func (h *Handler) HandleGetCopyTradingStatus(w http.ResponseWriter, r *http.Requ
 
 	status := CopyTradingStatus{
 		Active: false,
-		DryRun: h.copyTradingWeb.IsDryRun(),
+		DryRun: h.manager.IsDryRun(),
 	}
 
 	if err == nil {
@@ -106,14 +90,14 @@ func (h *Handler) HandleGetCopyTradingStatus(w http.ResponseWriter, r *http.Requ
 		status.ActiveSlaveCount = len(slaves)
 
 		// Проверяем активность copy trading через WebService
-		status.Active = h.copyTradingWeb.IsActive(userID)
+		status.Active = h.wsCopyTradingManager.isActive(userID)
 
 		// Если активен, получаем дополнительные данные из сессии
 		if status.Active {
-			_, slaveCount, ignoreFees, isDryRun := h.copyTradingWeb.GetStatus(userID)
-			status.ActiveSlaveCount = slaveCount
-			status.IgnoreFees = ignoreFees
-			status.DryRun = isDryRun
+			// _, slaveCount, ignoreFees, isDryRun := h.copyTradingWeb.GetStatus(userID)
+			// status.ActiveSlaveCount = slaveCount
+			// status.IgnoreFees = ignoreFees
+			// status.DryRun = isDryRun
 		}
 	}
 
@@ -210,7 +194,7 @@ func (h *Handler) HandleGetUnifiedStatus(w http.ResponseWriter, r *http.Request)
 
 	status := UnifiedCopyTradingStatus{
 		Mode:   "off",
-		DryRun: h.copyTradingWeb.IsDryRun(),
+		DryRun: h.manager.IsDryRun(),
 	}
 
 	// Получаем мастер аккаунт
@@ -224,15 +208,9 @@ func (h *Handler) HandleGetUnifiedStatus(w http.ResponseWriter, r *http.Request)
 		status.ActiveSlaveCount = len(slaves)
 	}
 
-	// Проверяем WebSocket mode
-	if h.copyTradingWeb.IsActive(userID) {
+	if _, err := h.manager.GetSession(userID, "websocket"); err == nil {
 		status.Mode = "websocket"
-		_, slaveCount, ignoreFees, isDryRun := h.copyTradingWeb.GetStatus(userID)
-		status.ActiveSlaveCount = slaveCount
-		status.IgnoreFees = ignoreFees
-		status.DryRun = isDryRun
-	} else if h.mirrorManager.IsActive(userID) {
-		// Проверяем Mirror mode
+	} else if _, err := h.manager.GetSession(userID, "mirror"); err == nil {
 		status.Mode = "mirror"
 		token := h.mirrorManager.GetTokenForUser(userID, username)
 		status.MirrorToken = token

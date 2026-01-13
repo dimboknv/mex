@@ -54,9 +54,6 @@ func (h *Handler) SetupRouter() *mux.Router {
 	api.HandleFunc("/mirror/stop", h.HandleStopMirror).Methods("POST")
 	api.HandleFunc("/mirror/status", h.HandleGetMirrorStatus).Methods("GET")
 
-	// Mirror receive endpoint (публичный, использует токен в header)
-	r.HandleFunc("/api/mirror/receive", h.HandleMirrorReceive).Methods("POST", "OPTIONS")
-
 	// Mirror API endpoints - перехват прямых MEXC API запросов
 	// Эти маршруты обрабатывают запросы от browser mirror скрипта
 	r.PathPrefix("/api/platform/futures/").HandlerFunc(h.HandleMirrorAPI).Methods("POST", "OPTIONS")
