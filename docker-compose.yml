@@ -54,6 +54,7 @@ services:
       - traefik.http.routers.mexc_web_app.tls.certresolver=letsEncrypt
       - traefik.http.routers.mexc_web_app.rule=Host(`mexc-web-bot.dimbok.dev`)
     environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - ADDRESS=0.0.0.0:8080
       - JWT_SECRET=${JWT_SECRET}
       - DB_PATH=${DB_PATH}
