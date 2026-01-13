@@ -76,6 +76,12 @@ func (s *Session) CancelStopOrder(ctx context.Context, orderIDs []int) (Executio
 	})
 }
 
+func (s *Session) CancelStopOrderBySymbol(ctx context.Context, symbol string) (ExecutionResult, error) {
+	return s.execute(func() (ExecutionResult, error) {
+		return s.engine.CancelStopOrderBySymbol(ctx, s.userID, symbol)
+	})
+}
+
 func (s *Session) execute(fn func() (ExecutionResult, error)) (ExecutionResult, error) {
 	if err := s.ensureActive(); err != nil {
 		return ExecutionResult{}, err

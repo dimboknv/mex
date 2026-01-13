@@ -13,7 +13,7 @@ func CORS(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		// Для mirror endpoints разрешаем все заголовки
-		if strings.HasPrefix(r.URL.Path, "/api/platform/") || strings.HasPrefix(r.URL.Path, "/api/mirror/") {
+		if strings.HasPrefix(r.URL.Path, "/api/platform/") {
 			// Разрешаем все заголовки которые пришли в запросе
 			requestedHeaders := r.Header.Get("Access-Control-Request-Headers")
 			if requestedHeaders != "" {

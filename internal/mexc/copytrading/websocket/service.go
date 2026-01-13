@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	copytrading "tg_mexc/internal/mexc/copytrading"
@@ -69,14 +70,6 @@ func (s *Service) Start() error {
 		}
 	})
 
-	wsClient.SetOrderDealHandler(func(event any) {
-		if deal, ok := event.(websocket.DealEvent); ok {
-			ctx, cancel := timeoutCtx()
-			defer cancel()
-			s.handleOrderDealEvent(ctx, deal)
-		}
-	})
-
 	if err := wsClient.Connect(); err != nil {
 		return fmt.Errorf("websocket connection error: %w", err)
 	}
@@ -118,10 +111,21 @@ func (s *Service) handleStopOrderEvent(ctx context.Context, stop websocket.StopO
 	}
 }
 
-// handleStopPlanOrderEvent обрабатывает событие изменения SL/TP для Service
+// handleStopPlanOrderEvent обрабатывает событие изменения/отмены SL/TP для Service
 func (s *Service) handleStopPlanOrderEvent(ctx context.Context, stopPlan websocket.StopPlanOrderEvent) {
+	// isFinished == 1 означает отмену стоп-ордера
+	if stopPlan.IsFinished == 1 {
+		if _, err := s.session.CancelStopOrderBySymbol(ctx, stopPlan.Symbol); err != nil {
+			s.logger.Error("Failed to cancel stop order", slog.Any("error", err))
+		}
+		return
+	}
+
+	// isFinished == 0 означает изменение стоп-ордера
 	req := fromWebSocketStopPlanOrder(stopPlan)
-	s.session.ChangePlanPrice(ctx, req)
+	if _, err := s.session.ChangePlanPrice(ctx, req); err != nil {
+		s.logger.Error("Failed to change plan price", slog.Any("error", err))
+	}
 }
 
 // handlePositionEvent обрабатывает событие позиции для Service
@@ -134,19 +138,6 @@ func (s *Service) handlePositionEvent(ctx context.Context, pos websocket.Positio
 	if _, err := s.session.ClosePosition(ctx, *closeReq); err != nil {
 		s.logger.Error("Failed to execute close position", slog.Any("error", err))
 	}
-}
-
-// handleOrderDealEvent обрабатывает событие сделки для Service
-func (s *Service) handleOrderDealEvent(ctx context.Context, deal websocket.DealEvent) {
-	level := "info"
-	if deal.Profit < 0 {
-		level = "warning"
-	}
-
-	s.logger.Log(ctx, slog.LevelInfo, "Order deal executed",
-		slog.Any("deal", deal),
-		slog.String("level", level),
-	)
 }
 
 // fromWebSocketOrder конвертирует websocket.OrderEvent в запрос
@@ -188,7 +179,9 @@ func fromWebSocketStopOrder(event websocket.StopOrderEvent) copytrading.PlacePla
 
 // fromWebSocketStopPlanOrder конвертирует websocket.StopPlanOrderEvent в ChangePlanPriceRequest
 func fromWebSocketStopPlanOrder(event websocket.StopPlanOrderEvent) copytrading.ChangePlanPriceRequest {
+	orderID, _ := strconv.Atoi(event.OrderId)
 	return copytrading.ChangePlanPriceRequest{
+		StopPlanOrderID:   orderID,
 		StopLossPrice:     event.StopLossPrice,
 		LossTrend:         event.LossTrend,
 		ProfitTrend:       event.ProfitTrend,

@@ -406,7 +406,7 @@ func (e *Engine) ChangePlanPrice(ctx context.Context, userID int, req ChangePlan
 
 	var symbol string
 	for _, order := range masterOrders {
-		if order.OrderId == strconv.Itoa(req.StopPlanOrderID) {
+		if order.Id == req.StopPlanOrderID {
 			symbol = order.Symbol
 			break
 		}
@@ -715,4 +715,25 @@ func (e *Engine) processCancelStopOrder(ctx context.Context, acc models2.Account
 	result.Success = true
 
 	return result
+}
+
+// CancelStopOrderBySymbol отменяет стоп-ордера на всех slave аккаунтах по символу
+func (e *Engine) CancelStopOrderBySymbol(ctx context.Context, userID int, symbol string) (ExecutionResult, error) {
+	result, err := e.execute(userID, func(acc models2.Account) AccountResult {
+		return e.processCancelStopOrder(ctx, acc, CancelStopOrderRequest{Symbol: symbol})
+	})
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+
+	record := models2.Trade{
+		UserID: userID,
+		Symbol: symbol,
+		Action: "cancel_stop_order",
+	}
+	if err := e.saveTrade(ctx, record, result); err != nil {
+		return ExecutionResult{}, fmt.Errorf("failed to save trade: %w", err)
+	}
+
+	return result, nil
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -73,7 +72,7 @@ func (h *Handler) HandleGetAccountsWithDetails(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	ctx := context.Background()
+	ctx := r.Context()
 	var response []AccountResponse
 
 	for _, acc := range accounts {

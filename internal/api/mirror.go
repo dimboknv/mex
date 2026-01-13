@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"tg_mexc/internal/api/middleware"
 )
@@ -39,7 +41,10 @@ func (h *Handler) HandleMirrorAPI(w http.ResponseWriter, r *http.Request) {
 
 	// Обрабатываем в горутине
 	go func() {
-		if err := h.copyTradingSvc.ProcessMirrorRequest(r.Context(), token, path, body); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := h.copyTradingSvc.ProcessMirrorRequest(ctx, token, path, body); err != nil {
 			h.logger.Error("Mirror request failed",
 				slog.String("path", path),
 				slog.Int("user_id", userID),

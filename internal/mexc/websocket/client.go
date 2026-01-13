@@ -73,25 +73,14 @@ type StopOrderEvent struct {
 }
 
 type StopPlanOrderEvent struct {
-	IsFinished        int     `json:"isFinished"`
+	IsFinished        int     `json:"isFinished"` // 1 = cancelled/finished, 0 = active/modified
 	LossTrend         int     `json:"lossTrend"`
 	OrderId           string  `json:"orderId"`
+	Symbol            string  `json:"symbol"`
 	ProfitTrend       int     `json:"profitTrend"`
 	StopLossReverse   int     `json:"stopLossReverse"`
 	TakeProfitReverse int     `json:"takeProfitReverse"`
 	StopLossPrice     float64 `json:"stopLossPrice"`
-}
-type DealEvent struct {
-	ID        string  `json:"id"`
-	Symbol    string  `json:"symbol"`
-	Side      int     `json:"side"`
-	Vol       float64 `json:"vol"`
-	Price     float64 `json:"price"`
-	Fee       float64 `json:"fee"`
-	Timestamp int64   `json:"timestamp"`
-	Profit    float64 `json:"profit"`
-	IsTaker   bool    `json:"isTaker"`
-	OrderID   string  `json:"orderId"`
 }
 
 type EventHandler func(event any)
@@ -111,7 +100,6 @@ type Client struct {
 	positionHandler      EventHandler
 	stopOrderHandler     EventHandler
 	stopPlanOrderHandler EventHandler
-	orderDealHandler     EventHandler
 
 	// Для матчинга событий
 	pendingOrders map[string]*pendingOrder
@@ -145,10 +133,6 @@ func (c *Client) SetStopOrderHandler(handler EventHandler) {
 
 func (c *Client) SetStopPlanOrderHandler(handler EventHandler) {
 	c.stopPlanOrderHandler = handler
-}
-
-func (c *Client) SetOrderDealHandler(handler EventHandler) {
-	c.orderDealHandler = handler
 }
 
 func (c *Client) Connect() error {
@@ -321,22 +305,7 @@ func (c *Client) handleMessage(msg Message) {
 			c.stopPlanOrderHandler(stopPlan)
 		}
 
-	case "push.personal.order.deal":
-		var deal DealEvent
-		if err := json.Unmarshal(msg.Data, &deal); err != nil {
-			c.logger.Error("Failed to unmarshal push.personal.order.deal",
-				slog.Any("error", err),
-				slog.String("data", string(msg.Data)),
-			)
-
-			return
-		}
-
-		if c.orderDealHandler != nil {
-			c.orderDealHandler(deal)
-		}
-
-	case "pong", "push.personal.asset", "push.personal.liquidate.risk", "rs.personal.filter", "rs.sub.order", "rs.sub.position":
+	case "pong", "push.personal.asset", "push.personal.liquidate.risk", "rs.personal.filter", "rs.sub.order", "rs.sub.position", "push.personal.order.deal":
 		return
 
 	default:
