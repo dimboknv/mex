@@ -25,8 +25,10 @@ services:
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - DRY_RUN=${DRY_RUN:-true}
+      - DB_PATH=${DB_PATH}
       - WEBHOOK_URL=${WEBHOOK_URL}
-      - ADDRESS=0.0.0.0:8080
+      - WEBHOOK_PATH=${WEBHOOK_PATH}
+      - ADDRESS=${ADDRESS}
     volumes:
       - ./data/tg-bot:/app/data
 
@@ -54,7 +56,7 @@ services:
     environment:
       - ADDRESS=0.0.0.0:8080
       - JWT_SECRET=${JWT_SECRET}
-      - DB_PATH=/app/data/web_app.db
+      - DB_PATH=${DB_PATH}
       - DRY_RUN=${DRY_RUN:-true}
       - API_URL=${API_URL}
     volumes:
