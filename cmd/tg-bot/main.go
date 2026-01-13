@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// Инициализация Copy Trading
-	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, cfg.DryRun)
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, webStorage, logger, cfg.DryRun)
 	manager := copytrading.NewManager(engine, cfg.DryRun, logger)
 	copyTradingSvc := telegramcopytrading.New(manager, webStorage, logger)
 

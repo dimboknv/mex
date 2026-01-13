@@ -82,6 +82,14 @@ func (s *Session) CancelStopOrderBySymbol(ctx context.Context, symbol string) (E
 	})
 }
 
+// SaveStopOrder сохраняет stop order в кэш для оптимизации последующих lookup'ов
+func (s *Session) SaveStopOrder(orderID string, symbol string) error {
+	if s.engine.stopOrderCache == nil {
+		return nil
+	}
+	return s.engine.stopOrderCache.SaveStopOrder(s.userID, orderID, symbol)
+}
+
 func (s *Session) execute(fn func() (ExecutionResult, error)) (ExecutionResult, error) {
 	if err := s.ensureActive(); err != nil {
 		return ExecutionResult{}, err

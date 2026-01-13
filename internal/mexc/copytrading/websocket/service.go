@@ -105,6 +105,13 @@ func (s *Service) handleOrderEvent(ctx context.Context, order websocket.OrderEve
 
 // handleStopOrderEvent обрабатывает событие stop order для Service
 func (s *Service) handleStopOrderEvent(ctx context.Context, stop websocket.StopOrderEvent) {
+	// Кэшируем stop order для оптимизации последующих lookup'ов
+	if stop.OrderID != "" && stop.Symbol != "" {
+		if err := s.session.SaveStopOrder(stop.OrderID, stop.Symbol); err != nil {
+			s.logger.Warn("Failed to cache stop order", slog.Any("error", err))
+		}
+	}
+
 	req := fromWebSocketStopOrder(stop)
 	if _, err := s.session.PlacePlanOrder(ctx, req); err != nil {
 		s.logger.Error("Failed to execute place plan order", slog.Any("error", err))
@@ -113,6 +120,13 @@ func (s *Service) handleStopOrderEvent(ctx context.Context, stop websocket.StopO
 
 // handleStopPlanOrderEvent обрабатывает событие изменения/отмены SL/TP для Service
 func (s *Service) handleStopPlanOrderEvent(ctx context.Context, stopPlan websocket.StopPlanOrderEvent) {
+	// Кэшируем stop order для оптимизации последующих lookup'ов
+	if stopPlan.OrderId != "" && stopPlan.Symbol != "" {
+		if err := s.session.SaveStopOrder(stopPlan.OrderId, stopPlan.Symbol); err != nil {
+			s.logger.Warn("Failed to cache stop order", slog.Any("error", err))
+		}
+	}
+
 	// isFinished == 1 означает отмену стоп-ордера
 	if stopPlan.IsFinished == 1 {
 		if _, err := s.session.CancelStopOrderBySymbol(ctx, stopPlan.Symbol); err != nil {
@@ -182,6 +196,7 @@ func fromWebSocketStopPlanOrder(event websocket.StopPlanOrderEvent) copytrading.
 	orderID, _ := strconv.Atoi(event.OrderId)
 	return copytrading.ChangePlanPriceRequest{
 		StopPlanOrderID:   orderID,
+		Symbol:            event.Symbol, // Передаём symbol напрямую - не нужен API lookup
 		StopLossPrice:     event.StopLossPrice,
 		LossTrend:         event.LossTrend,
 		ProfitTrend:       event.ProfitTrend,

@@ -31,28 +31,37 @@ type UserStorage interface {
 	GetSlaveAccounts(userID int, includeInactive bool) ([]models2.Account, error)
 }
 
+type StopOrderCache interface {
+	GetStopOrderSymbol(userID int, orderID string) (string, error)
+	SaveStopOrder(userID int, orderID string, symbol string) error
+	SaveStopOrders(userID int, orders map[string]string) error
+}
+
 // Engine - core механизм копирования
 type Engine struct {
-	logStorage   LogStorage
-	tradeStorage TradeStorage
-	userStorage  UserStorage
-	logger       *slog.Logger
-	dryRun       bool
+	logStorage     LogStorage
+	tradeStorage   TradeStorage
+	userStorage    UserStorage
+	stopOrderCache StopOrderCache
+	logger         *slog.Logger
+	dryRun         bool
 }
 
 func NewEngine(
 	logStorage LogStorage,
 	tradeStorage TradeStorage,
 	userStorage UserStorage,
+	stopOrderCache StopOrderCache,
 	logger *slog.Logger,
 	dryRun bool,
 ) *Engine {
 	return &Engine{
-		logStorage:   logStorage,
-		tradeStorage: tradeStorage,
-		userStorage:  userStorage,
-		logger:       logger,
-		dryRun:       dryRun,
+		logStorage:     logStorage,
+		tradeStorage:   tradeStorage,
+		userStorage:    userStorage,
+		stopOrderCache: stopOrderCache,
+		logger:         logger,
+		dryRun:         dryRun,
 	}
 }
 
@@ -388,27 +397,54 @@ func (e *Engine) processPlacePlanOrder(ctx context.Context, acc models2.Account,
 
 // ChangePlanPrice обновляет SL/TP на всех slave аккаунтах
 func (e *Engine) ChangePlanPrice(ctx context.Context, userID int, req ChangePlanPriceRequest) (ExecutionResult, error) {
-	masterAccount, err := e.userStorage.GetMasterAccount(userID)
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to get master account: %w", err)
+	orderID := strconv.Itoa(req.StopPlanOrderID)
+
+	// 1. Если symbol уже передан в request (WebSocket mode) - используем его
+	symbol := req.Symbol
+
+	// 2. Если нет - ищем в кэше
+	if symbol == "" && e.stopOrderCache != nil {
+		cachedSymbol, err := e.stopOrderCache.GetStopOrderSymbol(userID, orderID)
+		if err == nil && cachedSymbol != "" {
+			symbol = cachedSymbol
+			e.logger.Info("Stop order symbol found in cache",
+				slog.String("order_id", orderID),
+				slog.String("symbol", symbol))
+		}
 	}
 
-	// Получаем символ от мастера
-	masterClient, err := mexc.NewClient(masterAccount, e.logger)
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to create master client: %w", err)
-	}
+	// 3. Fallback - API вызов к master account
+	if symbol == "" {
+		masterAccount, err := e.userStorage.GetMasterAccount(userID)
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to get master account: %w", err)
+		}
 
-	masterOrders, err := masterClient.GetOpenStopOrders(ctx, "")
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to get master open orders: %w", err)
-	}
+		masterClient, err := mexc.NewClient(masterAccount, e.logger)
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to create master client: %w", err)
+		}
 
-	var symbol string
-	for _, order := range masterOrders {
-		if order.Id == req.StopPlanOrderID {
-			symbol = order.Symbol
-			break
+		masterOrders, err := masterClient.GetOpenStopOrders(ctx, "")
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to get master open orders: %w", err)
+		}
+
+		// Ищем нужный order и кэшируем все orders
+		// ВАЖНО: ключ кэша - это order.Id (int), не order.OrderId (string)
+		ordersToCache := make(map[string]string)
+		for _, order := range masterOrders {
+			ordersToCache[strconv.Itoa(order.Id)] = order.Symbol
+			if order.Id == req.StopPlanOrderID {
+				symbol = order.Symbol
+			}
+		}
+
+		// Сохраняем в кэш для будущих запросов
+		if e.stopOrderCache != nil && len(ordersToCache) > 0 {
+			if err := e.stopOrderCache.SaveStopOrders(userID, ordersToCache); err != nil {
+				e.logger.Warn("Failed to cache stop orders", slog.Any("error", err))
+			}
 		}
 	}
 
@@ -584,30 +620,64 @@ func (e *Engine) processChangeLeverage(ctx context.Context, acc models2.Account,
 
 // CancelStopOrder отменяет стоп-ордера на всех slave аккаунтах
 func (e *Engine) CancelStopOrder(ctx context.Context, userID int, orderIDs []int) (ExecutionResult, error) {
-	masterAccount, err := e.userStorage.GetMasterAccount(userID)
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to get master account: %w", err)
-	}
-
-	masterClient, err := mexc.NewClient(masterAccount, e.logger)
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to create master client: %w", err)
-	}
-
-	masterOrders, err := masterClient.GetOpenStopOrders(ctx, "")
-	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("failed to get master open orders: %w", err)
-	}
-
 	orderIDsStrings := make([]string, 0, len(orderIDs))
 	for _, orderID := range orderIDs {
 		orderIDsStrings = append(orderIDsStrings, strconv.Itoa(orderID))
 	}
 
+	// 1. Пытаемся найти symbols в кэше
 	symbols := make([]string, 0, len(orderIDs))
-	for _, order := range masterOrders {
-		if slices.Contains(orderIDsStrings, order.OrderId) {
-			symbols = append(symbols, order.Symbol)
+	missingOrderIDs := make([]string, 0)
+
+	if e.stopOrderCache != nil {
+		for _, orderID := range orderIDsStrings {
+			cachedSymbol, err := e.stopOrderCache.GetStopOrderSymbol(userID, orderID)
+			if err == nil && cachedSymbol != "" {
+				symbols = append(symbols, cachedSymbol)
+				e.logger.Info("Stop order symbol found in cache",
+					slog.String("order_id", orderID),
+					slog.String("symbol", cachedSymbol))
+			} else {
+				missingOrderIDs = append(missingOrderIDs, orderID)
+			}
+		}
+	} else {
+		missingOrderIDs = orderIDsStrings
+	}
+
+	// 2. Если есть missing - идем по API
+	if len(missingOrderIDs) > 0 {
+		masterAccount, err := e.userStorage.GetMasterAccount(userID)
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to get master account: %w", err)
+		}
+
+		masterClient, err := mexc.NewClient(masterAccount, e.logger)
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to create master client: %w", err)
+		}
+
+		masterOrders, err := masterClient.GetOpenStopOrders(ctx, "")
+		if err != nil {
+			return ExecutionResult{}, fmt.Errorf("failed to get master open orders: %w", err)
+		}
+
+		// Кэшируем все orders и находим нужные symbols
+		// ВАЖНО: ключ кэша - это order.Id (int), не order.OrderId (string)
+		ordersToCache := make(map[string]string)
+		for _, order := range masterOrders {
+			orderIDStr := strconv.Itoa(order.Id)
+			ordersToCache[orderIDStr] = order.Symbol
+			if slices.Contains(missingOrderIDs, orderIDStr) {
+				symbols = append(symbols, order.Symbol)
+			}
+		}
+
+		// Сохраняем в кэш
+		if e.stopOrderCache != nil && len(ordersToCache) > 0 {
+			if err := e.stopOrderCache.SaveStopOrders(userID, ordersToCache); err != nil {
+				e.logger.Warn("Failed to cache stop orders", slog.Any("error", err))
+			}
 		}
 	}
 
@@ -619,7 +689,8 @@ func (e *Engine) CancelStopOrder(ctx context.Context, userID int, orderIDs []int
 	var mu sync.Mutex
 
 	errg, c := errgroup.WithContext(ctx)
-	for _, symbol := range symbols {
+	for _, sym := range symbols {
+		symbol := sym // capture для goroutine
 		errg.Go(func() error {
 			res, err := e.execute(userID, func(acc models2.Account) AccountResult {
 				return e.processCancelStopOrder(c, acc, CancelStopOrderRequest{Symbol: symbol})

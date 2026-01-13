@@ -179,6 +179,18 @@ CREATE INDEX if NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 	// Миграция: делаем username и password_hash nullable для telegram-only пользователей
 	// SQLite не поддерживает ALTER COLUMN, поэтому просто игнорируем если не сработает
 
+	// Миграция: таблица кэша stop orders для оптимизации API вызовов
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS master_stop_orders (
+			user_id INTEGER NOT NULL,
+			order_id TEXT NOT NULL,
+			symbol TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, order_id),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)
+	`)
+
 	s.logger.Info("✅ Web database initialized")
 
 	return nil
@@ -994,4 +1006,56 @@ func (s *WebStorage) CleanupExpiredRefreshTokens() error {
 // Close закрывает соединение с БД
 func (s *WebStorage) Close() error {
 	return s.db.Close()
+}
+
+// === Stop Order Cache ===
+
+// GetStopOrderSymbol получает symbol по order_id из кэша
+func (s *WebStorage) GetStopOrderSymbol(userID int, orderID string) (string, error) {
+	var symbol string
+	err := s.db.QueryRow(`
+		SELECT symbol FROM master_stop_orders
+		WHERE user_id = ? AND order_id = ?
+	`, userID, orderID).Scan(&symbol)
+	if err != nil {
+		return "", err
+	}
+	return symbol, nil
+}
+
+// SaveStopOrder сохраняет маппинг order_id -> symbol в кэш (upsert)
+func (s *WebStorage) SaveStopOrder(userID int, orderID string, symbol string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO master_stop_orders (user_id, order_id, symbol)
+		VALUES (?, ?, ?)
+		ON CONFLICT(user_id, order_id) DO UPDATE SET symbol = excluded.symbol
+	`, userID, orderID, symbol)
+	return err
+}
+
+// SaveStopOrders сохраняет несколько stop orders в кэш (batch upsert)
+func (s *WebStorage) SaveStopOrders(userID int, orders map[string]string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO master_stop_orders (user_id, order_id, symbol)
+		VALUES (?, ?, ?)
+		ON CONFLICT(user_id, order_id) DO UPDATE SET symbol = excluded.symbol
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for orderID, symbol := range orders {
+		if _, err := stmt.Exec(userID, orderID, symbol); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

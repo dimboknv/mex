@@ -48,7 +48,7 @@ func main() {
 	authService := auth.NewService(cfg.JWTSecret, 24*time.Hour) // Токен действителен 24 часа
 
 	// Инициализация copy trading сервисов
-	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, cfg.DryRun)
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, webStorage, logger, cfg.DryRun)
 	manager := copytrading.NewManager(engine, cfg.DryRun, logger)
 
 	// Создаём главный сервис copy trading

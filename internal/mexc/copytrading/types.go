@@ -29,6 +29,7 @@ type PlacePlanOrderRequest struct {
 // ChangePlanPriceRequest - запрос на изменение SL/TP
 type ChangePlanPriceRequest struct {
 	StopPlanOrderID   int
+	Symbol            string // Опционально: если передан, не нужен API lookup
 	StopLossPrice     float64
 	LossTrend         int
 	ProfitTrend       int
