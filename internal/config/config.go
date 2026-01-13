@@ -9,8 +9,9 @@ import (
 type Config struct {
 	TelegramToken string
 	DBPath        string
-	LogFile       string
 	DryRun        bool // Режим тестирования - только логирование, без реальных сделок
+	JWTSecret     string
+	APIURL        string
 
 	// Webhook configuration
 	WebhookURL  string // URL для webhook (e.g., https://tg.example.com/webhook)
@@ -43,9 +44,27 @@ func Load(logger *slog.Logger) *Config {
 		webhookPath = "/webhook"
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "default-secret-change-me-in-production" // В продакшене использовать настоящий секрет!
+
+		logger.Warn("⚠️  JWT_SECRET not set, using default (insecure!)")
+	}
+
+	// API URL для frontend и mirror скрипта
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:8080"
+	}
+
 	address := os.Getenv("ADDRESS")
 	if address == "" {
 		address = "0.0.0.0:8080"
+	}
+
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./mexc.db"
 	}
 
 	if webhookURL != "" {
@@ -56,8 +75,9 @@ func Load(logger *slog.Logger) *Config {
 
 	return &Config{
 		TelegramToken: token,
-		DBPath:        "./accounts_browser.db",
-		LogFile:       "bot_browser.log",
+		DBPath:        dbPath,
+		JWTSecret:     jwtSecret,
+		APIURL:        apiURL,
 		DryRun:        dryRun,
 		WebhookURL:    webhookURL,
 		WebhookPath:   webhookPath,

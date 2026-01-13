@@ -16,8 +16,8 @@ RUN go mod download
 COPY . .
 
 # Build both applications
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /tg_bot ./cmd/tg-bot/
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /web_app ./cmd/web-app/
+RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /tg_bot ./cmd/tg-bot/
+RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /web_app ./cmd/web-app/
 
 # Final stage with both binaries
 FROM alpine:3.19

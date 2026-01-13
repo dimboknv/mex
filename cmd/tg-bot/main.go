@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,29 +20,16 @@ import (
 )
 
 func main() {
-	// Конфигурация slog для вывода в файл и stdout
-	logFile, err := os.OpenFile("bot_browser.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
-	if err != nil {
-		log.Fatal("Failed to open log file:", err)
-	}
-	defer logFile.Close()
-
-	// Pretty handler для stdout с цветами
-	prettyHandler := tint.NewHandler(os.Stdout, &tint.Options{
+	fileHandler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:      slog.LevelDebug,
 		TimeFormat: time.Kitchen, // "3:04PM"
 		AddSource:  false,
 		NoColor:    false,
 	})
 
-	// Обычный текстовый handler для файла
-	fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
-
 	// Мультиплексируем логи в оба handler'а
 	logger := slog.New(&multiHandler{
-		handlers: []slog.Handler{prettyHandler, fileHandler},
+		handlers: []slog.Handler{fileHandler},
 	})
 
 	logger.Info("=== MEXC Copy Trading Bot (Browser Auth) ===")

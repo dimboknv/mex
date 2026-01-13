@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,20 +13,14 @@ import (
 	"tg_mexc/internal/api"
 	"tg_mexc/internal/api/auth"
 	apicopytrading "tg_mexc/internal/api/copytrading"
-	copytrading "tg_mexc/internal/mexc/copytrading"
+	"tg_mexc/internal/config"
+	"tg_mexc/internal/mexc/copytrading"
 	"tg_mexc/internal/storage"
 
 	"github.com/lmittmann/tint"
 )
 
 func main() {
-	// Конфигурация slog для вывода в файл и stdout
-	logFile, err := os.OpenFile("web_app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
-	if err != nil {
-		log.Fatal("Failed to open log file:", err)
-	}
-	defer logFile.Close()
-
 	// Pretty handler для stdout с цветами
 	prettyHandler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:      slog.LevelDebug,
@@ -36,54 +29,15 @@ func main() {
 		NoColor:    false,
 	})
 
-	// Обычный текстовый handler для файла
-	fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
-
 	// Мультиплексируем логи в оба handler'а
 	logger := slog.New(&multiHandler{
-		handlers: []slog.Handler{prettyHandler, fileHandler},
+		handlers: []slog.Handler{prettyHandler},
 	})
 
-	logger.Info("=== MEXC Copy Trading Web App ===")
-
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "default-secret-change-me-in-production" // В продакшене использовать настоящий секрет!
-
-		logger.Warn("⚠️  JWT_SECRET not set, using default (insecure!)")
-	}
-
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "./web_app.db"
-	}
-
-	address := os.Getenv("ADDRESS")
-	if address == "" {
-		address = ":8080"
-	}
-
-	// API URL для frontend и mirror скрипта
-	apiURL := os.Getenv("API_URL")
-	if apiURL == "" {
-		apiURL = "http://localhost:8080"
-	}
-	logger.Info("API URL configured", slog.String("url", apiURL))
-
-	// Проверяем DRY_RUN флаг
-	dryRun := true
-	if os.Getenv("DRY_RUN") == "false" {
-		dryRun = false
-
-		logger.Warn("⚠️  DRY_RUN disabled - REAL TRADES WILL BE EXECUTED!")
-	} else {
-		logger.Info("🔍 DRY_RUN enabled - only logging, no real trades")
-	}
+	cfg := config.Load(logger)
 
 	// Инициализация БД
-	webStorage, err := storage.NewWeb(dbPath, logger)
+	webStorage, err := storage.NewWeb(cfg.DBPath, logger)
 	if err != nil {
 		logger.Error("Failed to initialize storage", slog.Any("error", err))
 		os.Exit(1)
@@ -91,24 +45,24 @@ func main() {
 	defer webStorage.Close()
 
 	// Инициализация auth сервиса
-	authService := auth.NewService(jwtSecret, 24*time.Hour) // Токен действителен 24 часа
+	authService := auth.NewService(cfg.JWTSecret, 24*time.Hour) // Токен действителен 24 часа
 
 	// Инициализация copy trading сервисов
-	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
-	manager := copytrading.NewManager(engine, dryRun, logger)
+	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, cfg.DryRun)
+	manager := copytrading.NewManager(engine, cfg.DryRun, logger)
 
 	// Создаём главный сервис copy trading
-	copyTradingSvc := apicopytrading.NewService(manager, webStorage, apiURL, logger)
+	copyTradingSvc := apicopytrading.NewService(manager, webStorage, cfg.APIURL, logger)
 
 	// Инициализация API handler
-	apiHandler := api.New(webStorage, authService, copyTradingSvc, apiURL, logger)
+	apiHandler := api.New(webStorage, authService, copyTradingSvc, cfg.APIURL, logger)
 
 	// Настройка роутинга (статика встроена через go:embed)
 	router := apiHandler.SetupRouter()
 
 	// HTTP сервер
 	srv := &http.Server{
-		Addr:         address,
+		Addr:         cfg.Address,
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -117,8 +71,8 @@ func main() {
 
 	// Запускаем сервер в горутине
 	go func() {
-		logger.Info("🚀 Server starting...", slog.String("address", address))
-		logger.Info(fmt.Sprintf("📡 API available at %s", apiURL))
+		logger.Info("🚀 Server starting...", slog.String("address", cfg.Address))
+		logger.Info(fmt.Sprintf("📡 API available at %s", cfg.APIURL))
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server failed to start", slog.Any("error", err))
