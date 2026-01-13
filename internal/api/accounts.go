@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"tg_mexc/internal/middleware"
-	"tg_mexc/pkg/models"
-	"tg_mexc/pkg/services/mexc"
+
+	"tg_mexc/internal/api/middleware"
+	"tg_mexc/internal/mexc"
+	"tg_mexc/internal/models"
 
 	"github.com/gorilla/mux"
 )

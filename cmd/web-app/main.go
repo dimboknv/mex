@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"tg_mexc/internal/api"
-	"tg_mexc/internal/auth"
-	"tg_mexc/pkg/services/copytrading"
-	"tg_mexc/pkg/storage"
+	"tg_mexc/internal/api/auth"
+	apicopytrading "tg_mexc/internal/api/copytrading"
+	copytrading2 "tg_mexc/internal/mexc/copytrading"
+	"tg_mexc/internal/storage"
 
 	"github.com/lmittmann/tint"
 )
@@ -92,12 +93,15 @@ func main() {
 	// Инициализация auth сервиса
 	authService := auth.NewService(jwtSecret, 24*time.Hour) // Токен действителен 24 часа
 
-	// Инициализация copy trading сервиса для Web App
-	engine := copytrading.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
-	manager := copytrading.NewManager(engine, dryRun, logger)
+	// Инициализация copy trading сервисов
+	engine := copytrading2.NewEngine(webStorage, webStorage, webStorage, logger, dryRun)
+	manager := copytrading2.NewManager(engine, dryRun, logger)
+
+	// Создаём главный сервис copy trading
+	copyTradingSvc := apicopytrading.NewService(manager, webStorage, apiURL, logger)
 
 	// Инициализация API handler
-	apiHandler := api.New(webStorage, authService, manager, apiURL, logger)
+	apiHandler := api.New(webStorage, authService, copyTradingSvc, apiURL, logger)
 
 	// Настройка роутинга (статика встроена через go:embed)
 	router := apiHandler.SetupRouter()
@@ -130,7 +134,7 @@ func main() {
 	logger.Info("🛑 Shutting down server...")
 
 	// Останавливаем все активные сессии copy trading
-	manager.StopAllSessions()
+	copyTradingSvc.StopAll()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

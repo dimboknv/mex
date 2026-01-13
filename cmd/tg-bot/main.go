@@ -8,11 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"tg_mexc/internal/handlers"
-	"tg_mexc/pkg/config"
-	"tg_mexc/pkg/services/telegram"
-	"tg_mexc/pkg/storage"
 	"time"
+
+	"tg_mexc/internal/config"
+	"tg_mexc/internal/storage"
+	"tg_mexc/internal/telegram"
+	"tg_mexc/internal/telegram/handlers"
 
 	"github.com/lmittmann/tint"
 )

@@ -1,11 +1,10 @@
 package api
 
 import (
-	"io/fs"
 	"net/http"
 
-	"tg_mexc/internal/middleware"
-	"tg_mexc/web"
+	middleware2 "tg_mexc/internal/api/middleware"
+	"tg_mexc/internal/api/web"
 
 	"github.com/gorilla/mux"
 )
@@ -15,7 +14,7 @@ func (h *Handler) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
 
 	// Применяем CORS middleware ко всем маршрутам
-	r.Use(middleware.CORS)
+	r.Use(middleware2.CORS)
 
 	// Публичные маршруты (не требуют аутентификации)
 	r.HandleFunc("/api/auth/login", h.HandleLogin).Methods("POST", "OPTIONS")
@@ -25,7 +24,7 @@ func (h *Handler) SetupRouter() *mux.Router {
 
 	// Защищенные маршруты (требуют аутентификации)
 	api := r.PathPrefix("/api").Subrouter()
-	api.Use(middleware.AuthMiddleware(h.authService))
+	api.Use(middleware2.AuthMiddleware(h.authService))
 
 	// Accounts
 	api.HandleFunc("/accounts", h.HandleGetAccounts).Methods("GET")
@@ -36,11 +35,10 @@ func (h *Handler) SetupRouter() *mux.Router {
 	api.HandleFunc("/accounts/{id:[0-9]+}/disabled", h.HandleToggleDisabled).Methods("PUT")
 	api.HandleFunc("/accounts/script", h.HandleGetScript).Methods("GET")
 
-	// Copy Trading
-	api.HandleFunc("/copy-trading/start", h.HandleStartCopyTrading).Methods("POST")
-	api.HandleFunc("/copy-trading/stop", h.HandleStopCopyTrading).Methods("POST")
-	api.HandleFunc("/copy-trading/status", h.HandleGetCopyTradingStatus).Methods("GET")
-	api.HandleFunc("/copy-trading/unified-status", h.HandleGetUnifiedStatus).Methods("GET")
+	// Copy Trading - единый API
+	api.HandleFunc("/copy-trading/mode", h.HandleSetMode).Methods("POST")
+	api.HandleFunc("/copy-trading/status", h.HandleGetStatus).Methods("GET")
+	api.HandleFunc("/copy-trading/script", h.HandleGetMirrorScript).Methods("GET")
 
 	// Trades History
 	api.HandleFunc("/trades", h.HandleGetTrades).Methods("GET")
@@ -48,19 +46,12 @@ func (h *Handler) SetupRouter() *mux.Router {
 	// Activity Logs
 	api.HandleFunc("/logs", h.HandleGetLogs).Methods("GET")
 
-	// Mirror (Browser Copy Trading)
-	api.HandleFunc("/mirror/script", h.HandleGetMirrorScript).Methods("GET")
-	api.HandleFunc("/mirror/start", h.HandleStartMirror).Methods("POST")
-	api.HandleFunc("/mirror/stop", h.HandleStopMirror).Methods("POST")
-	api.HandleFunc("/mirror/status", h.HandleGetMirrorStatus).Methods("GET")
-
-	// Mirror API endpoints - перехват прямых MEXC API запросов
-	// Эти маршруты обрабатывают запросы от browser mirror скрипта
+	// Mirror API endpoints - перехват MEXC API запросов
 	r.PathPrefix("/api/platform/futures/").HandlerFunc(h.HandleMirrorAPI).Methods("POST", "OPTIONS")
 
-	// Статические файлы из embedded FS (должны быть в конце)
-	staticFS, _ := fs.Sub(web.StaticFiles, ".")
-	r.PathPrefix("/").Handler(http.FileServer(http.FS(staticFS)))
+	// Статические файлы (должны быть в конце)
+	fileServer := http.FileServer(http.FS(web.StaticFiles))
+	r.PathPrefix("/").Handler(fileServer)
 
 	return r
 }
